@@ -17,6 +17,7 @@ final class CocoaMqttTransport: NSObject, MqttTransport {
     private var mqtt: CocoaMQTT?
 
     func connect(host: String, port: Int, username: String, password: String, useTLS: Bool) {
+        mqtt?.disconnect()
         let clientID = "bambu-lan-viewer-\(UUID().uuidString)"
         let mqtt = CocoaMQTT(clientID: clientID, host: host, port: UInt16(port))
         mqtt.username = username

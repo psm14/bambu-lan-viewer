@@ -23,6 +23,9 @@ actor PrinterService {
     private var systemSequenceId: Int = 0
     private var printSequenceId: Int = 100
     private let userId: String = "1"
+    private var desiredConnection = false
+    private var reconnectTask: Task<Void, Never>?
+    private var reconnectAttempt: Int = 0
 
     init(
         config: PrinterConfig,
@@ -68,6 +71,13 @@ actor PrinterService {
     }
 
     func connect() async {
+        desiredConnection = true
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        await startConnection()
+    }
+
+    private func startConnection() async {
         guard state.connection != .connecting, state.connection != .connected else { return }
         guard let password = await secretStore.secret(for: config.id) else {
             await updateConnection(.failed(message: "Missing LAN access code."))
@@ -78,6 +88,9 @@ actor PrinterService {
     }
 
     func disconnect() async {
+        desiredConnection = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
         mqtt.disconnect()
         await updateConnection(.disconnected)
     }
@@ -103,12 +116,17 @@ actor PrinterService {
         case .connecting:
             await updateConnection(.connecting)
         case .connected:
+            reconnectAttempt = 0
+            reconnectTask?.cancel()
+            reconnectTask = nil
             await updateConnection(.connected)
             subscribeToReportTopic()
         case .disconnected:
             await updateConnection(.disconnected)
+            scheduleReconnect()
         case .failed(let message):
             await updateConnection(.failed(message: message))
+            scheduleReconnect()
         }
     }
 
@@ -180,6 +198,23 @@ actor PrinterService {
         await MainActor.run { [config, onConfigChanged] in
             onConfigChanged?(config)
         }
+    }
+
+    private func scheduleReconnect() {
+        guard desiredConnection else { return }
+        guard reconnectTask == nil else { return }
+        reconnectAttempt += 1
+        let delay = min(10.0, pow(2.0, Double(reconnectAttempt)) * 0.5)
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await self?.performReconnect()
+        }
+    }
+
+    private func performReconnect() async {
+        reconnectTask = nil
+        guard desiredConnection else { return }
+        await startConnection()
     }
 
     private func send(command: PrinterCommand) async {

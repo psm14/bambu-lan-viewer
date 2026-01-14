@@ -42,7 +42,7 @@
   * [x] subscribe(reportTopic)
   * [x] publish(commandTopic, payload)
   * [x] expose async stream / callback for incoming report messages
-  * [ ] implement reconnect hooks
+  * [x] implement reconnect hooks
   * [x] connection state callbacks
 * [x] implement tls trust hook:
 
