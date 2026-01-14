@@ -13,6 +13,8 @@ final class NativeVideoTransport: VideoTransport, @unchecked Sendable {
     var onStateChanged: ((VideoState) -> Void)?
 
     private let queue = DispatchQueue(label: "com.bambu.lanviewer.rtsp")
+    private let trustStore: TrustStore
+    private let printerID: UUID
     private var client: RTSPClient?
     private var depacketizer = H264RTPDepacketizer()
     private var decoder = H264DecoderVT()
@@ -22,7 +24,9 @@ final class NativeVideoTransport: VideoTransport, @unchecked Sendable {
     private var expectedPayloadType: Int?
     private var lastState: VideoState?
 
-    init() {
+    init(trustStore: TrustStore, printerID: UUID) {
+        self.trustStore = trustStore
+        self.printerID = printerID
         decoder.onFrame = { [weak self] imageBuffer, pts in
             self?.render(imageBuffer: imageBuffer, pts: pts)
         }
@@ -50,7 +54,20 @@ final class NativeVideoTransport: VideoTransport, @unchecked Sendable {
             self.rtpChannel = 0
 
             let credentials = RtspCredentials(username: username, password: password)
-            let client = RTSPClient(queue: self.queue, credentials: credentials)
+            let client = RTSPClient(
+                queue: self.queue,
+                credentials: credentials,
+                onTrustEvaluation: { [weak self] trust, completion in
+                    guard let self else {
+                        completion(false)
+                        return
+                    }
+                    Task {
+                        let allowed = await self.evaluateTrust(trust)
+                        completion(allowed)
+                    }
+                }
+            )
             self.client = client
 
             client.onInterleavedPacket = { [weak self] channel, payload in
@@ -124,5 +141,23 @@ final class NativeVideoTransport: VideoTransport, @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in
             self?.onStateChanged?(state)
         }
+    }
+
+    private func evaluateTrust(_ trust: SecTrust) async -> Bool {
+        guard let hash = TrustHasher.publicKeyHashBase64(from: trust) else {
+            report(.failed(message: "Unable to read printer certificate."))
+            return false
+        }
+
+        if let pinned = await trustStore.pinnedSPKIHash(for: printerID) {
+            if pinned == hash {
+                return true
+            }
+            report(.failed(message: "Certificate mismatch."))
+            return false
+        }
+
+        await trustStore.setPinnedSPKIHash(hash, for: printerID)
+        return true
     }
 }

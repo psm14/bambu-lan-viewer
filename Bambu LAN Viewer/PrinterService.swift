@@ -5,7 +5,6 @@
 //  Created by Patrick McLaughlin on 1/13/26.
 //
 
-import CryptoKit
 import Foundation
 import Security
 
@@ -324,16 +323,4 @@ private func logReport(_ message: MqttMessage) {
         print("[MQTT] \(message.topic): <\(message.payload.count) bytes>")
     }
 #endif
-}
-
-private enum TrustHasher {
-    static func publicKeyHashBase64(from trust: SecTrust) -> String? {
-        let certificates = SecTrustCopyCertificateChain(trust) as? [SecCertificate]
-        guard let certificate = certificates?.first else { return nil }
-        guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
-        var error: Unmanaged<CFError>?
-        guard let keyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else { return nil }
-        let digest = SHA256.hash(data: keyData)
-        return Data(digest).base64EncodedString()
-    }
 }

@@ -132,10 +132,10 @@ struct DashboardView: View {
         } message: {
             Text("This will end the current print job.")
         }
-        .onChange(of: store.state.job) { newValue in
+        .onChange(of: store.state.job) { _, newValue in
             handleJobUpdate(newValue)
         }
-        .onChange(of: store.state.lightOn) { newValue in
+        .onChange(of: store.state.lightOn) { _, newValue in
             guard newValue != nil else { return }
             lightOverride = nil
             pendingLightToken = nil
@@ -343,6 +343,8 @@ struct DashboardView: View {
                         username: store.config.username,
                         password: lanCode,
                         isActive: isActive,
+                        trustStore: environment.trustStore,
+                        printerID: store.config.id,
                         onStateChanged: { state in
                             videoState = state
                         }

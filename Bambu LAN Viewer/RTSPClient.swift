@@ -8,6 +8,7 @@
 import CryptoKit
 import Foundation
 import Network
+import Security
 
 struct RtspCredentials {
     let username: String
@@ -46,6 +47,7 @@ final class RTSPClient: @unchecked Sendable {
 
     private let queue: DispatchQueue
     private let credentials: RtspCredentials?
+    private let onTrustEvaluation: ((SecTrust, @escaping (Bool) -> Void) -> Void)?
     private var authenticator: RtspAuthenticator?
     private var connection: NWConnection?
     private var parser = RTSPStreamParser()
@@ -57,9 +59,14 @@ final class RTSPClient: @unchecked Sendable {
     private var keepaliveUri: String?
     private var connectContinuation: CheckedContinuation<Void, Error>?
 
-    init(queue: DispatchQueue, credentials: RtspCredentials?) {
+    init(
+        queue: DispatchQueue,
+        credentials: RtspCredentials?,
+        onTrustEvaluation: ((SecTrust, @escaping (Bool) -> Void) -> Void)? = nil
+    ) {
         self.queue = queue
         self.credentials = credentials
+        self.onTrustEvaluation = onTrustEvaluation
         if let credentials {
             self.authenticator = RtspAuthenticator(credentials: credentials)
         }
@@ -131,8 +138,14 @@ final class RTSPClient: @unchecked Sendable {
         if url.scheme?.lowercased() == "rtsps" {
             let tcp = NWProtocolTCP.Options()
             let tls = NWProtocolTLS.Options()
-            sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, _, completion in
-                completion(true)
+            let trustEvaluation = onTrustEvaluation
+            sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, completion in
+                if let trustEvaluation {
+                    let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
+                    trustEvaluation(secTrust, completion)
+                } else {
+                    completion(true)
+                }
             }, queue)
             parameters = NWParameters(tls: tls, tcp: tcp)
         } else {

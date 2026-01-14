@@ -13,10 +13,16 @@ struct RTSPPlayerView: UIViewRepresentable {
     let username: String
     let password: String
     let isActive: Bool
+    let trustStore: TrustStore
+    let printerID: UUID
     var onStateChanged: ((VideoState) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onStateChanged: onStateChanged)
+        Coordinator(
+            trustStore: trustStore,
+            printerID: printerID,
+            onStateChanged: onStateChanged
+        )
     }
 
     func makeUIView(context: Context) -> VideoRenderView {
@@ -50,8 +56,8 @@ struct RTSPPlayerView: UIViewRepresentable {
             }
         }
 
-        init(onStateChanged: ((VideoState) -> Void)? = nil) {
-            transport = NativeVideoTransport()
+        init(trustStore: TrustStore, printerID: UUID, onStateChanged: ((VideoState) -> Void)? = nil) {
+            transport = NativeVideoTransport(trustStore: trustStore, printerID: printerID)
             self.onStateChanged = onStateChanged
             super.init()
             transport.onStateChanged = { [weak self] state in
