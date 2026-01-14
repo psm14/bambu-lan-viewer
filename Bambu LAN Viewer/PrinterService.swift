@@ -25,6 +25,8 @@ actor PrinterService {
     private var desiredConnection = false
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt: Int = 0
+    private var connectionTimeoutTask: Task<Void, Never>?
+    private var connectionAttemptToken: UUID?
 
     init(
         config: PrinterConfig,
@@ -83,6 +85,7 @@ actor PrinterService {
             return
         }
         await updateConnection(.connecting)
+        scheduleConnectionTimeout()
         mqtt.connect(host: config.ip, port: config.mqttPort, username: config.username, password: password, useTLS: true)
     }
 
@@ -90,6 +93,7 @@ actor PrinterService {
         desiredConnection = false
         reconnectTask?.cancel()
         reconnectTask = nil
+        cancelConnectionTimeout()
         mqtt.disconnect()
         await updateConnection(.disconnected)
     }
@@ -118,13 +122,16 @@ actor PrinterService {
             reconnectAttempt = 0
             reconnectTask?.cancel()
             reconnectTask = nil
+            cancelConnectionTimeout()
             await updateConnection(.connected)
             subscribeToReportTopic()
         case .disconnected:
             await updateConnection(.disconnected)
+            cancelConnectionTimeout()
             scheduleReconnect()
         case .failed(let message):
             await updateConnection(.failed(message: message))
+            cancelConnectionTimeout()
             scheduleReconnect()
         }
     }
@@ -214,6 +221,31 @@ actor PrinterService {
         reconnectTask = nil
         guard desiredConnection else { return }
         await startConnection()
+    }
+
+    private func scheduleConnectionTimeout() {
+        cancelConnectionTimeout()
+        let token = UUID()
+        connectionAttemptToken = token
+        connectionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            await self?.handleConnectionTimeout(token)
+        }
+    }
+
+    private func cancelConnectionTimeout() {
+        connectionTimeoutTask?.cancel()
+        connectionTimeoutTask = nil
+        connectionAttemptToken = nil
+    }
+
+    private func handleConnectionTimeout(_ token: UUID) async {
+        guard desiredConnection else { return }
+        guard connectionAttemptToken == token else { return }
+        guard state.connection == .connecting else { return }
+        mqtt.disconnect()
+        await updateConnection(.failed(message: "Connection timed out."))
+        scheduleReconnect()
     }
 
     private func send(command: PrinterCommand) async {
