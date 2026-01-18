@@ -35,8 +35,9 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let video_config = config.clone();
+    let video_state = Arc::clone(&printer_state);
     tokio::spawn(async move {
-        rtsp::run_rtsp_hls(video_config).await;
+        rtsp::run_rtsp_hls(video_config, video_state).await;
     });
 
     let app_state = Arc::new(AppState {

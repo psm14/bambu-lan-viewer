@@ -146,7 +146,21 @@ phase 1: read current temps only.
 
 ---
 
-## 5. light state
+## 5. camera rtsp url
+
+reported under `print.ipcam.rtsp_url`:
+
+```json
+"print": {
+  "ipcam": {
+    "rtsp_url": "rtsps://192.168.1.19:322/streaming/live/1"
+  }
+}
+```
+
+use this value to bootstrap the RTSPS connection for the camera stream.
+
+## 6. light state
 
 reported under:
 
@@ -184,7 +198,7 @@ note: some firmwares reject `ledctrl` without the top-level `user_id` and timing
 
 ---
 
-## 6. pause / resume / stop (core controls)
+## 7. pause / resume / stop (core controls)
 
 ### pause
 
@@ -231,7 +245,7 @@ notes (observed on newer firmware):
 
 ---
 
-## 7. timing & cadence
+## 8. timing & cadence
 
 * report messages arrive:
 

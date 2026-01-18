@@ -13,6 +13,7 @@ pub struct PrinterState {
     pub bed_c: Option<f64>,
     pub chamber_c: Option<f64>,
     pub light: Option<String>,
+    pub rtsp_url: Option<String>,
     pub last_update: Option<DateTime<Utc>>,
 }
 
@@ -67,6 +68,16 @@ impl PrinterState {
 
         if let Some(light) = extract_light(report) {
             self.light = Some(light);
+        }
+
+        if let Some(rtsp_url) = read_str(
+            report
+                .pointer("/print/ipcam/rtsp_url")
+                .or_else(|| report.pointer("/ipcam/rtsp_url")),
+        ) {
+            if !rtsp_url.is_empty() {
+                self.rtsp_url = Some(rtsp_url.to_string());
+            }
         }
 
         self.last_update = Some(Utc::now());

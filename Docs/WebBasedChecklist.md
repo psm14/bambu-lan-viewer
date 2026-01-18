@@ -50,6 +50,7 @@
   * sdp parsing (extract SPS/PPS if available)
   * rtp parsing + h264 depacketizer (FU-A, STAP-A, single NAL)
   * output `AccessUnit { pts90k: u64, is_idr: bool, nals: Vec<Vec<u8>> }` via async channel
+  * [x] derive RTSP URL from MQTT report (`print.ipcam.rtsp_url`) with optional env override
 * [ ] add a debug endpoint `GET /api/video_debug` returning:
 
   * fps, last pts, last idr time, etc.

@@ -40,7 +40,8 @@ stretch goal later: ll-hls.
   * publish to `device/<serial>/request` for commands
 * rtsp client:
 
-  * connect to camera stream (likely rtsps/digest; you can keep your existing “strip tls/digest” proxy as a separate module or integrate directly)
+  * connect to camera stream (likely rtsps/digest)
+  * bootstrap the RTSP URL from `print.ipcam.rtsp_url` in MQTT reports (override via env if needed)
   * receive rtp/h264 access units
 * hls packager:
 

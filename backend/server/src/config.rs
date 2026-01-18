@@ -14,12 +14,8 @@ pub struct Config {
     pub mqtt_client_id: String,
     pub mqtt_keep_alive_secs: u64,
     pub mqtt_user_id: String,
-    pub rtsp_url: Option<String>,
-    pub rtsp_port: u16,
-    pub rtsp_path: String,
-    pub rtsp_username: String,
-    pub rtsp_password: String,
     pub rtsp_tls_insecure: bool,
+    pub rtsp_url: Option<String>,
     pub hls_output_dir: String,
     pub hls_target_duration_secs: f64,
     pub hls_window_segments: usize,
@@ -43,13 +39,8 @@ impl Config {
             env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "bambu-lan-viewer".to_string());
         let mqtt_keep_alive_secs = env_u64("MQTT_KEEP_ALIVE_SECS").unwrap_or(30);
         let mqtt_user_id = env::var("MQTT_USER_ID").unwrap_or_else(|_| "1".to_string());
-        let rtsp_url = env::var("RTSP_URL").ok();
-        let rtsp_port = env_u16("RTSP_PORT").unwrap_or(322);
-        let rtsp_path = env::var("RTSP_PATH").unwrap_or_else(|_| "/streaming/live/1".to_string());
-        let rtsp_username = env::var("RTSP_USERNAME").unwrap_or_else(|_| "bblp".to_string());
-        let rtsp_password =
-            env::var("RTSP_PASSWORD").unwrap_or_else(|_| printer_access_code.clone());
         let rtsp_tls_insecure = env_bool("RTSP_TLS_INSECURE", true);
+        let rtsp_url = env::var("RTSP_URL").ok();
         let hls_output_dir = env::var("HLS_OUTPUT_DIR").unwrap_or_else(|_| "hls".to_string());
         let hls_target_duration_secs = env_f64("HLS_TARGET_DURATION_SECS").unwrap_or(2.0);
         let hls_window_segments = env_usize("HLS_WINDOW_SEGMENTS").unwrap_or(6);
@@ -68,12 +59,8 @@ impl Config {
             mqtt_client_id,
             mqtt_keep_alive_secs,
             mqtt_user_id,
-            rtsp_url,
-            rtsp_port,
-            rtsp_path,
-            rtsp_username,
-            rtsp_password,
             rtsp_tls_insecure,
+            rtsp_url,
             hls_output_dir,
             hls_target_duration_secs,
             hls_window_segments,

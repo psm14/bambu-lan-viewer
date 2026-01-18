@@ -5,14 +5,16 @@ use crate::rtsp::depacketizer::H264RtpDepacketizer;
 use crate::rtsp::hls::HlsSegmenter;
 use crate::rtsp::rtp::RtpPacket;
 use crate::rtsp::time::RtpTimeMapper;
-use anyhow::Context;
+use crate::state::PrinterState;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use url::Url;
 
-pub async fn run_rtsp_hls(config: Config) {
+pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
     let output_dir = PathBuf::from(config.hls_output_dir.clone());
     let mut segmenter = match HlsSegmenter::new(
         output_dir,
@@ -28,19 +30,39 @@ pub async fn run_rtsp_hls(config: Config) {
         }
     };
 
+    let mut warned_missing = false;
+
     loop {
-        if let Err(error) = run_session(&config, &mut segmenter).await {
+        let url = match resolve_rtsp_url(&config, &state).await {
+            Some(url) => {
+                warned_missing = false;
+                url
+            }
+            None => {
+                if !warned_missing {
+                    warn!("waiting for rtsp url from mqtt report");
+                    warned_missing = true;
+                }
+                sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+
+        if let Err(error) = run_session(&config, &mut segmenter, url).await {
             warn!(?error, "rtsp session ended");
         }
         sleep(Duration::from_secs(2)).await;
     }
 }
 
-async fn run_session(config: &Config, segmenter: &mut HlsSegmenter) -> anyhow::Result<()> {
-    let url = build_rtsp_url(config)?;
+async fn run_session(
+    config: &Config,
+    segmenter: &mut HlsSegmenter,
+    url: Url,
+) -> anyhow::Result<()> {
     let credentials = Some(RtspCredentials {
-        username: config.rtsp_username.clone(),
-        password: config.rtsp_password.clone(),
+        username: "bblp".to_string(),
+        password: config.printer_access_code.clone(),
     });
     info!(%url, "starting rtsp session");
     let client = RtspClient::new(url.clone(), credentials, config.rtsp_tls_insecure);
@@ -114,22 +136,11 @@ async fn run_session(config: &Config, segmenter: &mut HlsSegmenter) -> anyhow::R
     Ok(())
 }
 
-fn build_rtsp_url(config: &Config) -> anyhow::Result<Url> {
+async fn resolve_rtsp_url(config: &Config, state: &Arc<RwLock<PrinterState>>) -> Option<Url> {
     if let Some(url) = config.rtsp_url.as_ref() {
-        return Url::parse(url).context("invalid RTSP_URL");
+        return Url::parse(url).ok();
     }
 
-    let mut path = config.rtsp_path.clone();
-    let lower = path.to_ascii_lowercase();
-    if lower.starts_with("rtsp://") || lower.starts_with("rtsps://") {
-        return Url::parse(&path).context("invalid rtsp url");
-    }
-    if !path.starts_with('/') {
-        path.insert(0, '/');
-    }
-    let url = format!(
-        "rtsps://{}:{}{}",
-        config.printer_host, config.rtsp_port, path
-    );
-    Url::parse(&url).context("invalid rtsp url")
+    let rtsp_url = state.read().await.rtsp_url.clone()?;
+    Url::parse(&rtsp_url).ok()
 }
