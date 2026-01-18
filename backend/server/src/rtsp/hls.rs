@@ -64,6 +64,9 @@ impl HlsSegmenter {
         pts90k: u64,
     ) -> anyhow::Result<()> {
         if self.current.is_none() {
+            if !access_unit.is_idr {
+                return Ok(());
+            }
             self.start_segment(pts90k);
         }
 
@@ -82,21 +85,35 @@ impl HlsSegmenter {
                     .extend_from_slice(&current.muxer.write_pat_pmt());
             }
 
-            if current.frames == 0 {
-                if access_unit.is_idr {
-                    if let (Some(sps), Some(pps)) = (self.sps.clone(), self.pps.clone()) {
-                        let mut nals = Vec::with_capacity(access_unit.nals.len() + 2);
-                        nals.push(sps);
-                        nals.push(pps);
-                        nals.extend(access_unit.nals.drain(..));
-                        access_unit.nals = nals;
-                    }
+            let mut prepend: Vec<Vec<u8>> = Vec::new();
+            let has_aud = access_unit
+                .nals
+                .iter()
+                .any(|nal| nal.first().map(|b| b & 0x1F) == Some(9));
+            if !has_aud {
+                prepend.push(vec![0x09, 0xF0]);
+            }
+
+            if current.frames == 0 && access_unit.is_idr {
+                if let (Some(sps), Some(pps)) = (self.sps.clone(), self.pps.clone()) {
+                    prepend.push(sps);
+                    prepend.push(pps);
                 }
+            }
+
+            if !prepend.is_empty() {
+                let mut nals = Vec::with_capacity(access_unit.nals.len() + prepend.len());
+                nals.extend(prepend);
+                nals.extend(access_unit.nals.drain(..));
+                access_unit.nals = nals;
             }
 
             current.has_idr |= access_unit.is_idr;
             current.last_pts = pts90k;
-            let bytes = current.muxer.write_access_unit(pts90k, &access_unit.nals);
+            let bytes =
+                current
+                    .muxer
+                    .write_access_unit(pts90k, &access_unit.nals, access_unit.is_idr);
             current.data.extend_from_slice(&bytes);
             current.frames = current.frames.saturating_add(1);
         }
@@ -162,7 +179,7 @@ impl HlsSegmenter {
         let media_sequence = self.segments.front().map(|seg| seg.seq).unwrap_or(0);
         let mut lines = Vec::new();
         lines.push("#EXTM3U".to_string());
-        lines.push("#EXT-X-VERSION:3".to_string());
+        lines.push("#EXT-X-VERSION:4".to_string());
         lines.push("#EXT-X-INDEPENDENT-SEGMENTS".to_string());
         lines.push(format!("#EXT-X-TARGETDURATION:{}", target_duration));
         lines.push(format!("#EXT-X-MEDIA-SEQUENCE:{}", media_sequence));
@@ -216,9 +233,9 @@ impl MpegTsMuxer {
         out
     }
 
-    fn write_access_unit(&mut self, pts90k: u64, nals: &[Vec<u8>]) -> Vec<u8> {
+    fn write_access_unit(&mut self, pts90k: u64, nals: &[Vec<u8>], is_idr: bool) -> Vec<u8> {
         let pes = build_pes(pts90k, nals);
-        packetize(0x101, &pes, &mut self.video_cc, Some(pts90k))
+        packetize(0x101, &pes, &mut self.video_cc, Some(pts90k), is_idr)
     }
 
     fn write_pat(&mut self) -> Vec<u8> {
@@ -242,8 +259,14 @@ fn build_pes(pts90k: u64, nals: &[Vec<u8>]) -> Vec<u8> {
     let pts = encode_pts(pts90k);
     let mut pes = Vec::with_capacity(payload.len() + 19);
     pes.extend_from_slice(&[0x00, 0x00, 0x01, 0xE0]);
-    pes.extend_from_slice(&[0x00, 0x00]);
-    pes.push(0x80);
+    let pes_len = payload.len().saturating_add(8);
+    let pes_packet_length = if pes_len > u16::MAX as usize {
+        0
+    } else {
+        pes_len as u16
+    };
+    pes.extend_from_slice(&pes_packet_length.to_be_bytes());
+    pes.push(0x84);
     pes.push(0x80);
     pes.push(0x05);
     pes.extend_from_slice(&pts);
@@ -298,10 +321,10 @@ fn packetize_with_pointer(pid: u16, section: &[u8], cc: &mut u8) -> Vec<u8> {
     let mut payload = Vec::with_capacity(section.len() + 1);
     payload.push(0x00);
     payload.extend_from_slice(section);
-    packetize(pid, &payload, cc, None)
+    packetize(pid, &payload, cc, None, false)
 }
 
-fn packetize(pid: u16, payload: &[u8], cc: &mut u8, pcr: Option<u64>) -> Vec<u8> {
+fn packetize(pid: u16, payload: &[u8], cc: &mut u8, pcr: Option<u64>, is_idr: bool) -> Vec<u8> {
     let mut out = Vec::new();
     let mut offset = 0;
     let mut first = true;
@@ -327,7 +350,11 @@ fn packetize(pid: u16, payload: &[u8], cc: &mut u8, pcr: Option<u64>) -> Vec<u8>
                 let adapt_len = 183 - payload_len;
                 packet.push(adapt_len as u8);
                 if adapt_len >= 7 {
-                    packet.push(0x10);
+                    let mut flags = 0x10;
+                    if is_idr {
+                        flags |= 0x40;
+                    }
+                    packet.push(flags);
                     packet.extend_from_slice(&encode_pcr(pcr_value));
                     if adapt_len > 7 {
                         packet.extend(std::iter::repeat(0xFF).take(adapt_len - 7));
