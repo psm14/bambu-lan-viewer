@@ -73,6 +73,32 @@
     text-transform: uppercase;
 }
 
+.video-card {
+    grid-column: span 2;
+}
+
+.video-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 16px;
+    background: #141511;
+    border: 1px solid var(--border);
+}
+
+.helper {
+    margin: 12px 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
 .stat {
     display: flex;
     align-items: baseline;
@@ -117,7 +143,9 @@ button {
     padding: 10px 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition:
+        transform 0.15s ease,
+        box-shadow 0.15s ease;
 }
 
 button:hover {
@@ -151,5 +179,9 @@ button.danger {
 
     .pill {
         align-self: flex-start;
+    }
+
+    .video-card {
+        grid-column: span 1;
     }
 }

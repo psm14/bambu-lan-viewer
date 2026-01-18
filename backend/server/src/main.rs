@@ -2,7 +2,9 @@ mod commands;
 mod config;
 mod http;
 mod mqtt;
+mod rtsp;
 mod state;
+mod tls;
 
 use crate::config::Config;
 use crate::http::AppState;
@@ -32,9 +34,15 @@ async fn main() -> anyhow::Result<()> {
         mqtt::run(mqtt_config, mqtt_state, command_rx).await;
     });
 
+    let video_config = config.clone();
+    tokio::spawn(async move {
+        rtsp::run_rtsp_hls(video_config).await;
+    });
+
     let app_state = Arc::new(AppState {
         printer_state,
         command_tx,
+        hls_dir: std::path::PathBuf::from(&config.hls_output_dir),
     });
     let app = http::router(app_state);
 

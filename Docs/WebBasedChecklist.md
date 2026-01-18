@@ -44,7 +44,7 @@
 
 ## phase 2: rtsp ingest to access units (still no hls)
 
-* [ ] implement `backend/src/rtsp/` module
+* [x] implement `backend/src/rtsp/` module
 
   * rtsp client (tcp interleaved)
   * sdp parsing (extract SPS/PPS if available)
@@ -56,41 +56,41 @@
 
 ## phase 3: hls packager (mpeg-ts) + serving
 
-* [ ] implement minimal mpeg-ts muxer:
+* [x] implement minimal mpeg-ts muxer:
 
-  * [ ] PAT/PMT generation
-  * [ ] PES packetization for H264
-  * [ ] PTS stamping
-  * [ ] TS packetization (188-byte packets)
-* [ ] implement segmenter:
+  * [x] PAT/PMT generation
+  * [x] PES packetization for H264
+  * [x] PTS stamping
+  * [x] TS packetization (188-byte packets)
+* [x] implement segmenter:
 
-  * [ ] maintain current segment buffer + start pts
-  * [ ] flush segment on (elapsed>=2s && is_idr)
-  * [ ] write `seg%06d.ts`
-  * [ ] update `stream.m3u8` atomically (write temp then rename)
-  * [ ] delete segments older than window
-* [ ] serve hls:
+  * [x] maintain current segment buffer + start pts
+  * [x] flush segment on (elapsed>=2s && is_idr)
+  * [x] write `seg%06d.ts`
+  * [x] update `stream.m3u8` atomically (write temp then rename)
+  * [x] delete segments older than window
+* [x] serve hls:
 
-  * [ ] `GET /hls/stream.m3u8` from disk
-  * [ ] `GET /hls/:segment.ts` from disk
-  * [ ] set content-types:
+  * [x] `GET /hls/stream.m3u8` from disk
+  * [x] `GET /hls/:segment.ts` from disk
+  * [x] set content-types:
 
     * m3u8: `application/vnd.apple.mpegurl`
     * ts: `video/mp2t`
-  * [ ] disable caching headers (or very short) to avoid stale playlist issues through proxies
+  * [x] disable caching headers (or very short) to avoid stale playlist issues through proxies
 
 ## phase 4: frontend video player
 
-* [ ] add `<video>` component
-* [ ] safari path:
+* [x] add `<video>` component
+* [x] safari path:
 
   * if `video.canPlayType('application/vnd.apple.mpegurl')` is truthy, set `src=/hls/stream.m3u8`
-* [ ] else use hls.js:
+* [x] else use hls.js:
 
   * attach media
   * loadSource `/hls/stream.m3u8`
-* [ ] add UI toggle “compatibility mode” / “reload video”
-* [ ] show stale indicator if `/api/status.lastUpdate` old
+* [x] add UI toggle “compatibility mode” / “reload video”
+* [x] show stale indicator if `/api/status.lastUpdate` old
 
 ## phase 5: docker-compose + cloudflared
 

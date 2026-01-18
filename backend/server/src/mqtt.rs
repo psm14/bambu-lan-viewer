@@ -1,14 +1,8 @@
 use crate::commands::CommandRequest;
 use crate::config::Config;
 use crate::state::PrinterState;
+use crate::tls;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport};
-use rustls::client::{
-    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier, WebPkiVerifier,
-};
-use rustls::{
-    Certificate, ClientConfig, DigitallySignedStruct, Error as RustlsError, ServerName,
-    SignatureScheme,
-};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -109,7 +103,7 @@ fn build_mqtt_options(config: &Config) -> MqttOptions {
     if config.mqtt_tls {
         if config.mqtt_tls_insecure {
             warn!("mqtt tls verification disabled");
-            let tls_config = insecure_rustls_config();
+            let tls_config = tls::insecure_client_config();
             options.set_transport(Transport::Tls(TlsConfiguration::Rustls(Arc::new(
                 tls_config,
             ))));
@@ -133,51 +127,5 @@ async fn set_connected(state: &Arc<RwLock<PrinterState>>, connected: bool) {
     guard.connected = connected;
     if !connected {
         guard.last_update = None;
-    }
-}
-
-fn insecure_rustls_config() -> ClientConfig {
-    let verifier = Arc::new(InsecureVerifier);
-    ClientConfig::builder()
-        .with_safe_defaults()
-        .with_custom_certificate_verifier(verifier)
-        .with_no_client_auth()
-}
-
-struct InsecureVerifier;
-
-impl ServerCertVerifier for InsecureVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &Certificate,
-        _intermediates: &[Certificate],
-        _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
-    ) -> Result<ServerCertVerified, RustlsError> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &Certificate,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, RustlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &Certificate,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, RustlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        WebPkiVerifier::verification_schemes()
     }
 }
