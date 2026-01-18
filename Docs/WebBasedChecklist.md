@@ -2,8 +2,8 @@
 
 ## phase 0: scaffolding
 
-* [ ] create `backend/` rust workspace (edition 2021)
-* [ ] add deps:
+* [x] create `backend/` rust workspace (edition 2021)
+* [x] add deps:
 
   * tokio
   * axum (http server)
@@ -12,32 +12,32 @@
   * rumqttc (mqtt)
   * bytes
   * parking_lot or tokio::sync (state sharing)
-* [ ] create `frontend/` react app (vite)
-* [ ] add hls.js dependency for non-safari playback
+* [x] create `frontend/` react app (vite)
+* [x] add hls.js dependency for non-safari playback
 * [ ] add top-level `docker-compose.yml`
 * [ ] add `cloudflared/` with template config or rely on tunnel token
 
 ## phase 1: mqtt status + commands (no video yet)
 
-* [ ] implement `backend/src/mqtt.rs`
+* [x] implement `backend/src/mqtt.rs`
 
   * connect to printer
   * subscribe report topic
   * parse relevant fields into `PrinterState`
   * store latest state in `Arc<RwLock<...>>` or a tokio watch channel
-* [ ] implement `backend/src/commands.rs`
+* [x] implement `backend/src/commands.rs`
 
   * request builder that always wraps `user_id`
   * implement:
 
     * pause/resume/stop (print.command)
     * light on/off (system.ledctrl with required fields)
-* [ ] implement `backend/src/http.rs` (axum routes)
+* [x] implement `backend/src/http.rs` (axum routes)
 
   * `GET /api/status`
   * `POST /api/command`
   * `GET /healthz`
-* [ ] frontend:
+* [x] frontend:
 
   * poll `/api/status` every 2–5s
   * buttons call `/api/command`

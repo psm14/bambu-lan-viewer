@@ -7,7 +7,10 @@ pub struct Config {
     pub printer_access_code: String,
     pub mqtt_port: u16,
     pub mqtt_tls: bool,
+    pub mqtt_tls_insecure: bool,
     pub mqtt_ca_cert: Option<String>,
+    pub mqtt_max_incoming_packet_size: usize,
+    pub mqtt_max_outgoing_packet_size: usize,
     pub mqtt_client_id: String,
     pub mqtt_keep_alive_secs: u64,
     pub mqtt_user_id: String,
@@ -22,7 +25,13 @@ impl Config {
         let mqtt_tls = env_bool("MQTT_TLS", true);
         let mqtt_port = env_u16("MQTT_PORT").unwrap_or_else(|| if mqtt_tls { 8883 } else { 1883 });
         let mqtt_ca_cert = env::var("MQTT_CA_CERT").ok();
-        let mqtt_client_id = env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "bambu-lan-viewer".to_string());
+        let mqtt_tls_insecure = env_bool("MQTT_TLS_INSECURE", mqtt_ca_cert.is_none());
+        let mqtt_max_incoming_packet_size =
+            env_usize("MQTT_MAX_INCOMING_PACKET_SIZE").unwrap_or(256 * 1024);
+        let mqtt_max_outgoing_packet_size =
+            env_usize("MQTT_MAX_OUTGOING_PACKET_SIZE").unwrap_or(64 * 1024);
+        let mqtt_client_id =
+            env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "bambu-lan-viewer".to_string());
         let mqtt_keep_alive_secs = env_u64("MQTT_KEEP_ALIVE_SECS").unwrap_or(30);
         let mqtt_user_id = env::var("MQTT_USER_ID").unwrap_or_else(|_| "1".to_string());
         let http_bind = env::var("HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
@@ -33,7 +42,10 @@ impl Config {
             printer_access_code,
             mqtt_port,
             mqtt_tls,
+            mqtt_tls_insecure,
             mqtt_ca_cert,
+            mqtt_max_incoming_packet_size,
+            mqtt_max_outgoing_packet_size,
             mqtt_client_id,
             mqtt_keep_alive_secs,
             mqtt_user_id,
@@ -58,5 +70,9 @@ fn env_u16(name: &str) -> Option<u16> {
 }
 
 fn env_u64(name: &str) -> Option<u64> {
+    env::var(name).ok().and_then(|value| value.parse().ok())
+}
+
+fn env_usize(name: &str) -> Option<usize> {
     env::var(name).ok().and_then(|value| value.parse().ok())
 }
