@@ -1,0 +1,155 @@
+.app {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px 56px;
+}
+
+.hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.eyebrow {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--accent-2);
+    margin: 0 0 8px;
+}
+
+.hero h1 {
+    font-size: clamp(2rem, 3vw, 3rem);
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+}
+
+.subhead {
+    margin: 0;
+    color: var(--muted);
+    max-width: 420px;
+}
+
+.pill {
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(6px);
+}
+
+.pill.ok {
+    color: #f5fff9;
+    background: var(--accent-2);
+}
+
+.pill.warn {
+    color: #fff6f1;
+    background: var(--accent);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+}
+
+.card h2 {
+    margin: 0 0 16px;
+    font-size: 1.1rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    gap: 16px;
+}
+
+.stat span {
+    color: var(--muted);
+}
+
+.stat strong {
+    font-size: 1.1rem;
+}
+
+.mono {
+    font-family: "Chivo Mono", "Menlo", "Courier New", monospace;
+}
+
+.stale {
+    color: var(--accent);
+}
+
+.stale-note {
+    margin: 12px 0 0;
+    font-size: 0.85rem;
+    color: var(--accent);
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+button {
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--ink);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(29, 31, 26, 0.12);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    box-shadow: none;
+    transform: none;
+}
+
+button.danger {
+    border-color: rgba(212, 90, 42, 0.5);
+    color: #b33d1a;
+}
+
+.error {
+    margin-top: 16px;
+    color: #b33d1a;
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .hero {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .pill {
+        align-self: flex-start;
+    }
+}

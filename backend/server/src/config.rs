@@ -1,0 +1,62 @@
+use std::env;
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub printer_host: String,
+    pub printer_serial: String,
+    pub printer_access_code: String,
+    pub mqtt_port: u16,
+    pub mqtt_tls: bool,
+    pub mqtt_ca_cert: Option<String>,
+    pub mqtt_client_id: String,
+    pub mqtt_keep_alive_secs: u64,
+    pub mqtt_user_id: String,
+    pub http_bind: String,
+}
+
+impl Config {
+    pub fn from_env() -> anyhow::Result<Self> {
+        let printer_host = required_env("PRINTER_HOST")?;
+        let printer_serial = required_env("PRINTER_SERIAL")?;
+        let printer_access_code = required_env("PRINTER_ACCESS_CODE")?;
+        let mqtt_tls = env_bool("MQTT_TLS", true);
+        let mqtt_port = env_u16("MQTT_PORT").unwrap_or_else(|| if mqtt_tls { 8883 } else { 1883 });
+        let mqtt_ca_cert = env::var("MQTT_CA_CERT").ok();
+        let mqtt_client_id = env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "bambu-lan-viewer".to_string());
+        let mqtt_keep_alive_secs = env_u64("MQTT_KEEP_ALIVE_SECS").unwrap_or(30);
+        let mqtt_user_id = env::var("MQTT_USER_ID").unwrap_or_else(|_| "1".to_string());
+        let http_bind = env::var("HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+
+        Ok(Self {
+            printer_host,
+            printer_serial,
+            printer_access_code,
+            mqtt_port,
+            mqtt_tls,
+            mqtt_ca_cert,
+            mqtt_client_id,
+            mqtt_keep_alive_secs,
+            mqtt_user_id,
+            http_bind,
+        })
+    }
+}
+
+fn required_env(name: &str) -> anyhow::Result<String> {
+    env::var(name).map_err(|_| anyhow::anyhow!("missing required env var: {name}"))
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(value) => matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"),
+        Err(_) => default,
+    }
+}
+
+fn env_u16(name: &str) -> Option<u16> {
+    env::var(name).ok().and_then(|value| value.parse().ok())
+}
+
+fn env_u64(name: &str) -> Option<u64> {
+    env::var(name).ok().and_then(|value| value.parse().ok())
+}

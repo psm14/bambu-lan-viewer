@@ -1,0 +1,35 @@
+@import url("https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap");
+
+:root {
+    color-scheme: light;
+    font-family: "Space Grotesk", "Avenir Next", "Futura", sans-serif;
+    line-height: 1.4;
+    font-weight: 400;
+    --bg: #f4efe2;
+    --bg-accent: #d8e7de;
+    --ink: #1d1f1a;
+    --muted: #5f6257;
+    --card: #fffaf0;
+    --accent: #d45a2a;
+    --accent-2: #1f6f5b;
+    --border: rgba(29, 31, 26, 0.15);
+    --shadow: 0 18px 40px rgba(29, 31, 26, 0.12);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background:
+        radial-gradient(circle at top right, rgba(216, 231, 222, 0.9), transparent 60%),
+        radial-gradient(circle at 20% 20%, rgba(255, 230, 200, 0.6), transparent 55%),
+        linear-gradient(180deg, var(--bg), #efe7d8 60%, #e9e1cf 100%);
+}
+
+button {
+    font-family: inherit;
+}
