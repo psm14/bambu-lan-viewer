@@ -127,7 +127,7 @@
 
 ---
 
-## stretch goal: ll-hls (later)
+## stretch goal: ll-hls (now available)
 
-* switch to fmp4/cmaf muxing and `#EXT-X-PART`
-* increased complexity; do only after regular hls is stable
+* [x] emit ll-hls playlist (`/hls/stream_ll.m3u8`) with `#EXT-X-PART` byte-range parts
+* [ ] true cmaf/fmp4 ll-hls (future)

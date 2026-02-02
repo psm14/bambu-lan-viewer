@@ -2,6 +2,7 @@ use crate::rtsp::depacketizer::AccessUnit;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -14,6 +15,8 @@ pub struct HlsSegmenter {
     current: Option<SegmentBuffer>,
     sps: Option<Vec<u8>>,
     pps: Option<Vec<u8>>,
+    ll_enabled: bool,
+    part_duration: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +24,16 @@ struct SegmentInfo {
     seq: u64,
     duration: f64,
     filename: String,
+    parts: Vec<PartInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct PartInfo {
+    index: u32,
+    duration: f64,
+    byte_start: u64,
+    byte_length: u64,
+    independent: bool,
 }
 
 #[derive(Debug)]
@@ -28,10 +41,19 @@ struct SegmentBuffer {
     seq: u64,
     start_pts: u64,
     last_pts: u64,
-    data: Vec<u8>,
     has_idr: bool,
     frames: u64,
     muxer: MpegTsMuxer,
+    filename: String,
+    file: fs::File,
+    bytes_written: u64,
+    parts: Vec<PartInfo>,
+    part_index: u32,
+    part_start_pts: u64,
+    part_start_byte: u64,
+    part_bytes: Vec<u8>,
+    part_frames: u64,
+    part_independent: bool,
 }
 
 impl HlsSegmenter {
@@ -39,8 +61,21 @@ impl HlsSegmenter {
         output_dir: PathBuf,
         target_duration: f64,
         window: usize,
+        ll_enabled: bool,
+        part_duration: f64,
     ) -> anyhow::Result<Self> {
         fs::create_dir_all(&output_dir).await?;
+        let mut resolved_part_duration = if ll_enabled {
+            part_duration
+        } else {
+            target_duration
+        };
+        if !resolved_part_duration.is_finite() || resolved_part_duration <= 0.0 {
+            resolved_part_duration = target_duration;
+        }
+        let min_part = 0.1;
+        let max_part = target_duration.max(min_part);
+        resolved_part_duration = resolved_part_duration.max(min_part).min(max_part);
         Ok(Self {
             output_dir,
             target_duration,
@@ -50,6 +85,8 @@ impl HlsSegmenter {
             current: None,
             sps: None,
             pps: None,
+            ll_enabled,
+            part_duration: resolved_part_duration,
         })
     }
 
@@ -67,56 +104,74 @@ impl HlsSegmenter {
             if !access_unit.is_idr {
                 return Ok(());
             }
-            self.start_segment(pts90k);
+            self.start_segment(pts90k).await?;
         }
 
-        if let Some(current) = self.current.as_ref() {
-            let elapsed = (pts90k.saturating_sub(current.start_pts)) as f64 / 90_000.0;
-            if elapsed >= self.target_duration && access_unit.is_idr {
-                self.finalize_segment().await?;
-                self.start_segment(pts90k);
+        let mut current = match self.current.take() {
+            Some(current) => current,
+            None => return Ok(()),
+        };
+
+        let elapsed = (pts90k.saturating_sub(current.start_pts)) as f64 / 90_000.0;
+        if elapsed >= self.target_duration && access_unit.is_idr {
+            self.flush_part(&mut current).await?;
+            self.finalize_segment_buffer(current).await?;
+            self.start_segment(pts90k).await?;
+            current = match self.current.take() {
+                Some(current) => current,
+                None => return Ok(()),
+            };
+        }
+
+        if self.ll_enabled {
+            let part_elapsed =
+                (pts90k.saturating_sub(current.part_start_pts)) as f64 / 90_000.0;
+            if current.part_frames > 0 && part_elapsed >= self.part_duration {
+                self.flush_part(&mut current).await?;
+                self.reset_part(&mut current, pts90k, access_unit.is_idr);
+                self.write_playlist(Some(&current)).await?;
             }
         }
 
-        if let Some(current) = self.current.as_mut() {
-            if current.data.is_empty() {
-                current
-                    .data
-                    .extend_from_slice(&current.muxer.write_pat_pmt());
-            }
-
-            let mut prepend: Vec<Vec<u8>> = Vec::new();
-            let has_aud = access_unit
-                .nals
-                .iter()
-                .any(|nal| nal.first().map(|b| b & 0x1F) == Some(9));
-            if !has_aud {
-                prepend.push(vec![0x09, 0xF0]);
-            }
-
-            if current.frames == 0 && access_unit.is_idr {
-                if let (Some(sps), Some(pps)) = (self.sps.clone(), self.pps.clone()) {
-                    prepend.push(sps);
-                    prepend.push(pps);
-                }
-            }
-
-            if !prepend.is_empty() {
-                let mut nals = Vec::with_capacity(access_unit.nals.len() + prepend.len());
-                nals.extend(prepend);
-                nals.extend(access_unit.nals.drain(..));
-                access_unit.nals = nals;
-            }
-
-            current.has_idr |= access_unit.is_idr;
-            current.last_pts = pts90k;
-            let bytes =
-                current
-                    .muxer
-                    .write_access_unit(pts90k, &access_unit.nals, access_unit.is_idr);
-            current.data.extend_from_slice(&bytes);
-            current.frames = current.frames.saturating_add(1);
+        if current.bytes_written == 0 && current.part_bytes.is_empty() {
+            current
+                .part_bytes
+                .extend_from_slice(&current.muxer.write_pat_pmt());
         }
+
+        let mut prepend: Vec<Vec<u8>> = Vec::new();
+        let has_aud = access_unit
+            .nals
+            .iter()
+            .any(|nal| nal.first().map(|b| b & 0x1F) == Some(9));
+        if !has_aud {
+            prepend.push(vec![0x09, 0xF0]);
+        }
+
+        if current.frames == 0 && access_unit.is_idr {
+            if let (Some(sps), Some(pps)) = (self.sps.clone(), self.pps.clone()) {
+                prepend.push(sps);
+                prepend.push(pps);
+            }
+        }
+
+        if !prepend.is_empty() {
+            let mut nals = Vec::with_capacity(access_unit.nals.len() + prepend.len());
+            nals.extend(prepend);
+            nals.extend(access_unit.nals.drain(..));
+            access_unit.nals = nals;
+        }
+
+        current.has_idr |= access_unit.is_idr;
+        current.last_pts = pts90k;
+        let bytes = current
+            .muxer
+            .write_access_unit(pts90k, &access_unit.nals, access_unit.is_idr);
+        current.part_bytes.extend_from_slice(&bytes);
+        current.frames = current.frames.saturating_add(1);
+        current.part_frames = current.part_frames.saturating_add(1);
+
+        self.current = Some(current);
 
         Ok(())
     }
@@ -126,6 +181,83 @@ impl HlsSegmenter {
             Some(current) => current,
             None => return Ok(()),
         };
+        self.finalize_segment_buffer(current).await
+    }
+
+    async fn start_segment(&mut self, pts90k: u64) -> anyhow::Result<()> {
+        let seq = self.sequence;
+        self.sequence = self.sequence.wrapping_add(1);
+        let filename = format!("seg{:06}.ts", seq);
+        let path = self.output_dir.join(&filename);
+        let file = fs::File::create(&path).await?;
+        self.current = Some(SegmentBuffer {
+            seq,
+            start_pts: pts90k,
+            last_pts: pts90k,
+            has_idr: false,
+            frames: 0,
+            muxer: MpegTsMuxer::new(),
+            filename,
+            file,
+            bytes_written: 0,
+            parts: Vec::new(),
+            part_index: 0,
+            part_start_pts: pts90k,
+            part_start_byte: 0,
+            part_bytes: Vec::new(),
+            part_frames: 0,
+            part_independent: true,
+        });
+        Ok(())
+    }
+
+    async fn flush_part(&self, current: &mut SegmentBuffer) -> anyhow::Result<()> {
+        if current.part_frames == 0 {
+            return Ok(());
+        }
+        let data = std::mem::take(&mut current.part_bytes);
+        if data.is_empty() {
+            current.part_frames = 0;
+            return Ok(());
+        }
+        current.file.write_all(&data).await?;
+        current.file.flush().await?;
+        let byte_start = current.part_start_byte;
+        let byte_length = data.len() as u64;
+        current.bytes_written = current.bytes_written.saturating_add(byte_length);
+        let duration = if current.last_pts > current.part_start_pts {
+            (current.last_pts - current.part_start_pts) as f64 / 90_000.0
+        } else {
+            self.part_duration.min(self.target_duration).max(0.1)
+        };
+        current.parts.push(PartInfo {
+            index: current.part_index,
+            duration,
+            byte_start,
+            byte_length,
+            independent: current.part_independent,
+        });
+        current.part_index = current.part_index.saturating_add(1);
+        current.part_start_byte = current.bytes_written;
+        current.part_frames = 0;
+        current.part_independent = false;
+        Ok(())
+    }
+
+    fn reset_part(&self, current: &mut SegmentBuffer, start_pts: u64, independent: bool) {
+        current.part_start_pts = start_pts;
+        current.part_start_byte = current.bytes_written;
+        current.part_frames = 0;
+        current.part_independent = independent;
+        current.part_bytes.clear();
+    }
+
+    async fn finalize_segment_buffer(
+        &mut self,
+        mut current: SegmentBuffer,
+    ) -> anyhow::Result<()> {
+        self.flush_part(&mut current).await?;
+        let _ = current.file.flush().await;
 
         let duration = if current.last_pts > current.start_pts {
             (current.last_pts - current.start_pts) as f64 / 90_000.0
@@ -133,15 +265,14 @@ impl HlsSegmenter {
             0.1
         };
 
-        let filename = format!("seg{:06}.ts", current.seq);
-        let path = self.output_dir.join(&filename);
-        fs::write(&path, current.data).await?;
+        let filename = current.filename.clone();
         debug!(segment = %filename, duration = %duration, "hls segment written");
 
         self.segments.push_back(SegmentInfo {
             seq: current.seq,
             duration,
             filename,
+            parts: current.parts,
         });
 
         while self.segments.len() > self.window {
@@ -151,25 +282,28 @@ impl HlsSegmenter {
             }
         }
 
-        self.write_playlist().await?;
+        self.write_playlist(None).await?;
         Ok(())
     }
 
-    fn start_segment(&mut self, pts90k: u64) {
-        let seq = self.sequence;
-        self.sequence = self.sequence.wrapping_add(1);
-        self.current = Some(SegmentBuffer {
-            seq,
-            start_pts: pts90k,
-            last_pts: pts90k,
-            data: Vec::new(),
-            has_idr: false,
-            frames: 0,
-            muxer: MpegTsMuxer::new(),
-        });
+    async fn write_playlist(&self, current: Option<&SegmentBuffer>) -> anyhow::Result<()> {
+        let standard = self.render_standard_playlist();
+        let tmp_path = self.output_dir.join("stream.m3u8.tmp");
+        let final_path = self.output_dir.join("stream.m3u8");
+        fs::write(&tmp_path, standard).await?;
+        fs::rename(tmp_path, final_path).await?;
+
+        if self.ll_enabled {
+            let ll = self.render_ll_playlist(current);
+            let tmp_ll = self.output_dir.join("stream_ll.m3u8.tmp");
+            let final_ll = self.output_dir.join("stream_ll.m3u8");
+            fs::write(&tmp_ll, ll).await?;
+            fs::rename(tmp_ll, final_ll).await?;
+        }
+        Ok(())
     }
 
-    async fn write_playlist(&self) -> anyhow::Result<()> {
+    fn render_standard_playlist(&self) -> String {
         let max_segment = self
             .segments
             .iter()
@@ -189,12 +323,64 @@ impl HlsSegmenter {
             lines.push(seg.filename.clone());
         }
 
-        let playlist = lines.join("\n") + "\n";
-        let tmp_path = self.output_dir.join("stream.m3u8.tmp");
-        let final_path = self.output_dir.join("stream.m3u8");
-        fs::write(&tmp_path, playlist).await?;
-        fs::rename(tmp_path, final_path).await?;
-        Ok(())
+        lines.join("\n") + "\n"
+    }
+
+    fn render_ll_playlist(&self, current: Option<&SegmentBuffer>) -> String {
+        let max_segment = self
+            .segments
+            .iter()
+            .map(|seg| seg.duration)
+            .fold(0.0_f64, f64::max);
+        let target_duration = self.target_duration.max(max_segment).ceil() as u64;
+        let media_sequence = self
+            .segments
+            .front()
+            .map(|seg| seg.seq)
+            .or_else(|| current.map(|seg| seg.seq))
+            .unwrap_or(0);
+        let part_hold_back = (self.part_duration * 3.0).max(self.part_duration + 0.1);
+        let hold_back = (target_duration as f64 * 3.0).max(part_hold_back * 2.0);
+
+        let mut lines = Vec::new();
+        lines.push("#EXTM3U".to_string());
+        lines.push("#EXT-X-VERSION:9".to_string());
+        lines.push("#EXT-X-INDEPENDENT-SEGMENTS".to_string());
+        lines.push(format!("#EXT-X-TARGETDURATION:{}", target_duration));
+        lines.push(format!(
+            "#EXT-X-PART-INF:PART-TARGET={:.3}",
+            self.part_duration
+        ));
+        lines.push(format!(
+            "#EXT-X-SERVER-CONTROL:PART-HOLD-BACK={:.3},HOLD-BACK={:.3}",
+            part_hold_back, hold_back
+        ));
+        lines.push(format!("#EXT-X-MEDIA-SEQUENCE:{}", media_sequence));
+
+        for seg in &self.segments {
+            Self::append_parts(&mut lines, &seg.filename, &seg.parts);
+            lines.push(format!("#EXTINF:{:.3},", seg.duration));
+            lines.push(seg.filename.clone());
+        }
+
+        if let Some(current) = current {
+            Self::append_parts(&mut lines, &current.filename, &current.parts);
+        }
+
+        lines.join("\n") + "\n"
+    }
+
+    fn append_parts(lines: &mut Vec<String>, filename: &str, parts: &[PartInfo]) {
+        for part in parts {
+            let mut line = format!(
+                "#EXT-X-PART:DURATION={:.3},URI=\"{}\",BYTERANGE=\"{}@{}\"",
+                part.duration, filename, part.byte_length, part.byte_start
+            );
+            if part.independent {
+                line.push_str(",INDEPENDENT=YES");
+            }
+            lines.push(line);
+        }
     }
 
     pub fn playlist_path(&self) -> PathBuf {

@@ -110,6 +110,28 @@ start with **disk**. it’s robust and easy.
 
 ---
 
+## 3b) ll-hls (low latency, optional)
+
+backend can emit a low-latency playlist alongside the standard one:
+
+* standard: `GET /hls/stream.m3u8`
+* low-latency: `GET /hls/stream_ll.m3u8`
+
+ll-hls settings (env):
+
+* `HLS_LOW_LATENCY` (default true)
+* `HLS_PART_DURATION_SECS` (default `0.333`)
+
+frontend (hls.js) prefers the ll-hls playlist and will fall back to the standard playlist if the ll playlist is missing.
+
+note: the ll-hls playlist uses mpeg-ts byte-range parts (no cmaf/fmp4), so safari stays on the standard playlist for now.
+
+frontend env:
+
+* `VITE_HLS_LOW_LATENCY` (default true)
+
+---
+
 ## 4) rtsp ingest options (choose one)
 
 ### implement full rtsps + digest in rust

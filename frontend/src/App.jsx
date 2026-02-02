@@ -7,6 +7,8 @@ const POLL_MS = 3000;
 
 const JOB_TIMEOUT_MS = 5000;
 const LIGHT_TIMEOUT_MS = 3000;
+const LOW_LATENCY_DEFAULT =
+  String(import.meta.env.VITE_HLS_LOW_LATENCY ?? "true").toLowerCase() === "true";
 
 function formatTemp(value) {
   if (value == null || Number.isNaN(value)) {
@@ -37,13 +39,16 @@ export default function App() {
   const [lightOverride, setLightOverride] = useState(null);
   const [pendingLightToken, setPendingLightToken] = useState(null);
   const [videoReload, setVideoReload] = useState(0);
+  const [useLowLatency, setUseLowLatency] = useState(LOW_LATENCY_DEFAULT);
   const videoRef = useRef(null);
   const pendingJobTokenRef = useRef(null);
   const pendingJobTimeoutRef = useRef(null);
   const pendingLightTokenRef = useRef(null);
   const pendingLightTimeoutRef = useRef(null);
 
-  const hlsUrl = `${API_BASE}/hls/stream.m3u8`;
+  const baseHlsUrl = `${API_BASE}/hls/stream.m3u8`;
+  const llHlsUrl = `${API_BASE}/hls/stream_ll.m3u8`;
+  const hlsUrl = useLowLatency ? llHlsUrl : baseHlsUrl;
 
   useEffect(() => {
     let isActive = true;
@@ -142,6 +147,10 @@ export default function App() {
       const hls = new Hls({
         enableWorker: true,
         backBufferLength: 0,
+        lowLatencyMode: useLowLatency,
+        liveSyncDurationCount: useLowLatency ? 1 : 3,
+        liveMaxLatencyDurationCount: useLowLatency ? 3 : 6,
+        maxLiveSyncPlaybackRate: useLowLatency ? 1.5 : 1.0,
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
@@ -150,6 +159,17 @@ export default function App() {
         const message = `HLS error: ${data.type} ${data.details} fatal=${data.fatal}`;
         console.error(message, data);
         if (data.fatal) {
+          if (
+            useLowLatency &&
+            (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+              data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR ||
+              data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR)
+          ) {
+            hls.destroy();
+            setUseLowLatency(false);
+            setVideoReload((value) => value + 1);
+            return;
+          }
           setVideoError(message);
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
@@ -173,7 +193,7 @@ export default function App() {
     }
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsUrl;
+      video.src = baseHlsUrl;
       return () => {
         video.removeEventListener("error", onVideoError);
         video.removeAttribute("src");

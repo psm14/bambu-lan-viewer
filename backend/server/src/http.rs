@@ -31,6 +31,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/command", post(post_command))
         .route("/healthz", get(healthz))
         .route("/hls/stream.m3u8", get(get_playlist))
+        .route("/hls/stream_ll.m3u8", get(get_ll_playlist))
         .route("/hls/:segment", get(get_segment))
         .with_state(state)
         .layer(
@@ -118,6 +119,25 @@ async fn healthz() -> impl IntoResponse {
 
 async fn get_playlist(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let path = state.hls_dir.join("stream.m3u8");
+    match tokio::fs::read(path).await {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [
+                (
+                    axum::http::header::CONTENT_TYPE,
+                    "application/vnd.apple.mpegurl",
+                ),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn get_ll_playlist(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let path = state.hls_dir.join("stream_ll.m3u8");
     match tokio::fs::read(path).await {
         Ok(bytes) => (
             StatusCode::OK,

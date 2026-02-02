@@ -20,6 +20,8 @@ pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
         output_dir,
         config.hls_target_duration_secs,
         config.hls_window_segments,
+        config.hls_low_latency,
+        config.hls_part_duration_secs,
     )
     .await
     {

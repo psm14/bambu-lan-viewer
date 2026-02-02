@@ -19,6 +19,8 @@ pub struct Config {
     pub hls_output_dir: String,
     pub hls_target_duration_secs: f64,
     pub hls_window_segments: usize,
+    pub hls_low_latency: bool,
+    pub hls_part_duration_secs: f64,
     pub http_bind: String,
 }
 
@@ -44,6 +46,8 @@ impl Config {
         let hls_output_dir = env::var("HLS_OUTPUT_DIR").unwrap_or_else(|_| "hls".to_string());
         let hls_target_duration_secs = env_f64("HLS_TARGET_DURATION_SECS").unwrap_or(2.0);
         let hls_window_segments = env_usize("HLS_WINDOW_SEGMENTS").unwrap_or(6);
+        let hls_low_latency = env_bool("HLS_LOW_LATENCY", true);
+        let hls_part_duration_secs = env_f64("HLS_PART_DURATION_SECS").unwrap_or(0.333);
         let http_bind = env::var("HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
 
         Ok(Self {
@@ -64,6 +68,8 @@ impl Config {
             hls_output_dir,
             hls_target_duration_secs,
             hls_window_segments,
+            hls_low_latency,
+            hls_part_duration_secs,
             http_bind,
         })
     }
