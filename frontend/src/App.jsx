@@ -135,16 +135,10 @@ export default function App() {
     };
     video.addEventListener("error", onVideoError);
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsUrl;
-      return () => {
-        video.removeEventListener("error", onVideoError);
-        video.removeAttribute("src");
-        video.load();
-      };
-    }
+    const isSafari =
+      typeof navigator !== "undefined" && /Apple/.test(navigator.vendor);
 
-    if (Hls.isSupported()) {
+    if (Hls.isSupported() && !isSafari) {
       const hls = new Hls({
         enableWorker: true,
         backBufferLength: 0,
@@ -175,6 +169,15 @@ export default function App() {
       return () => {
         video.removeEventListener("error", onVideoError);
         hls.destroy();
+      };
+    }
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = hlsUrl;
+      return () => {
+        video.removeEventListener("error", onVideoError);
+        video.removeAttribute("src");
+        video.load();
       };
     }
 
