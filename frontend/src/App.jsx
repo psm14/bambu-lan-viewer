@@ -5,13 +5,8 @@ import "./App.css";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const POLL_MS = 3000;
 
-const commandLabels = {
-  pause: "Pause",
-  resume: "Resume",
-  stop: "Stop",
-  lightOn: "Light On",
-  lightOff: "Light Off",
-};
+const JOB_TIMEOUT_MS = 5000;
+const LIGHT_TIMEOUT_MS = 3000;
 
 function formatTemp(value) {
   if (value == null || Number.isNaN(value)) {
@@ -38,9 +33,15 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState("");
   const [videoError, setVideoError] = useState("");
-  const [busyCommand, setBusyCommand] = useState("");
+  const [pendingJobAction, setPendingJobAction] = useState(null);
+  const [lightOverride, setLightOverride] = useState(null);
+  const [pendingLightToken, setPendingLightToken] = useState(null);
   const [videoReload, setVideoReload] = useState(0);
   const videoRef = useRef(null);
+  const pendingJobTokenRef = useRef(null);
+  const pendingJobTimeoutRef = useRef(null);
+  const pendingLightTokenRef = useRef(null);
+  const pendingLightTimeoutRef = useRef(null);
 
   const hlsUrl = `${API_BASE}/hls/stream.m3u8`;
 
@@ -70,6 +71,17 @@ export default function App() {
     return () => {
       isActive = false;
       clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pendingJobTimeoutRef.current) {
+        clearTimeout(pendingJobTimeoutRef.current);
+      }
+      if (pendingLightTimeoutRef.current) {
+        clearTimeout(pendingLightTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -138,6 +150,30 @@ export default function App() {
 
   const connected = status?.connected === true;
   const jobState = status?.jobState ?? "UNKNOWN";
+  const normalizedJobState = normalizeJobState(status?.jobState);
+  const isPaused = normalizedJobState === "paused";
+  const isPrinting = normalizedJobState === "printing";
+  const lightFromStatus = normalizeLight(status?.light);
+  const lightIsOn = lightOverride ?? lightFromStatus ?? false;
+  const canPauseResume =
+    connected && pendingJobAction == null && (isPrinting || isPaused);
+  const canStop = connected && pendingJobAction == null && (isPrinting || isPaused);
+  const canToggleLight = connected && pendingLightToken == null;
+  const pauseResumeLabel = pendingJobAction
+    ? pendingJobAction === "pause"
+      ? "Pausing..."
+      : pendingJobAction === "resume"
+        ? "Resuming..."
+        : "Pause"
+    : isPaused
+      ? "Resume"
+      : "Pause";
+  const stopLabel = pendingJobAction === "stop" ? "Stopping..." : "Stop";
+  const lightButtonLabel = pendingLightToken
+    ? "Updating..."
+    : lightIsOn
+      ? "Light Off"
+      : "Light On";
   const lastUpdate = status?.lastUpdate ? new Date(status.lastUpdate) : null;
   const staleSeconds =
     lastUpdate && !Number.isNaN(lastUpdate.getTime())
@@ -145,8 +181,18 @@ export default function App() {
       : null;
   const isStale = staleSeconds != null && staleSeconds > 15;
 
-  const sendCommand = async (payload, label) => {
-    setBusyCommand(label);
+  useEffect(() => {
+    handleJobUpdate(normalizedJobState);
+  }, [normalizedJobState]);
+
+  useEffect(() => {
+    if (status?.light == null) {
+      return;
+    }
+    clearPendingLight();
+  }, [status?.light]);
+
+  const sendCommand = async (payload) => {
     try {
       const response = await fetch(`${API_BASE}/api/command`, {
         method: "POST",
@@ -158,12 +204,137 @@ export default function App() {
         throw new Error(data.error || "command failed");
       }
       setError("");
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "command failed");
+      return false;
     } finally {
-      setBusyCommand("");
+      // no-op
     }
   };
+
+  const schedulePendingJob = (action) => {
+    setPendingJobAction(action);
+    const token = Date.now() + Math.random();
+    pendingJobTokenRef.current = token;
+    if (pendingJobTimeoutRef.current) {
+      clearTimeout(pendingJobTimeoutRef.current);
+    }
+    pendingJobTimeoutRef.current = setTimeout(() => {
+      if (pendingJobTokenRef.current === token) {
+        clearPendingJob();
+      }
+    }, JOB_TIMEOUT_MS);
+  };
+
+  const clearPendingJob = () => {
+    setPendingJobAction(null);
+    pendingJobTokenRef.current = null;
+    if (pendingJobTimeoutRef.current) {
+      clearTimeout(pendingJobTimeoutRef.current);
+      pendingJobTimeoutRef.current = null;
+    }
+  };
+
+  const handleJobUpdate = (jobStateValue) => {
+    if (!pendingJobAction) {
+      return;
+    }
+    switch (pendingJobAction) {
+      case "pause":
+        if (jobStateValue === "paused") {
+          clearPendingJob();
+        }
+        break;
+      case "resume":
+        if (jobStateValue === "printing") {
+          clearPendingJob();
+        }
+        break;
+      case "stop":
+        if (
+          jobStateValue === "idle" ||
+          jobStateValue === "finished" ||
+          jobStateValue === "error"
+        ) {
+          clearPendingJob();
+        }
+        break;
+      default:
+        break;
+    }
+  };
+
+  const scheduleLightTimeout = () => {
+    const token = Date.now() + Math.random();
+    pendingLightTokenRef.current = token;
+    setPendingLightToken(token);
+    if (pendingLightTimeoutRef.current) {
+      clearTimeout(pendingLightTimeoutRef.current);
+    }
+    pendingLightTimeoutRef.current = setTimeout(() => {
+      if (pendingLightTokenRef.current === token) {
+        clearPendingLight();
+      }
+    }, LIGHT_TIMEOUT_MS);
+  };
+
+  const clearPendingLight = () => {
+    pendingLightTokenRef.current = null;
+    setPendingLightToken(null);
+    setLightOverride(null);
+    if (pendingLightTimeoutRef.current) {
+      clearTimeout(pendingLightTimeoutRef.current);
+      pendingLightTimeoutRef.current = null;
+    }
+  };
+
+  const handlePauseResume = async () => {
+    if (!canPauseResume) {
+      return;
+    }
+    if (isPaused) {
+      schedulePendingJob("resume");
+      const ok = await sendCommand({ type: "resume" });
+      if (!ok) {
+        clearPendingJob();
+      }
+      return;
+    }
+    if (isPrinting) {
+      schedulePendingJob("pause");
+      const ok = await sendCommand({ type: "pause" });
+      if (!ok) {
+        clearPendingJob();
+      }
+    }
+  };
+
+  const handleStop = async () => {
+    if (!canStop) {
+      return;
+    }
+    schedulePendingJob("stop");
+    const ok = await sendCommand({ type: "stop" });
+    if (!ok) {
+      clearPendingJob();
+    }
+  };
+
+  const handleLightToggle = async () => {
+    if (!canToggleLight) {
+      return;
+    }
+    const nextValue = !lightIsOn;
+    setLightOverride(nextValue);
+    scheduleLightTimeout();
+    const ok = await sendCommand({ type: "light", on: nextValue });
+    if (!ok) {
+      clearPendingLight();
+    }
+  };
+
+  const jobStateDisplay = formatJobState(jobState, normalizedJobState);
 
   return (
     <div className="app">
@@ -207,7 +378,7 @@ export default function App() {
           <h2>Status</h2>
           <div className="stat">
             <span>Job</span>
-            <strong>{jobState}</strong>
+            <strong>{jobStateDisplay}</strong>
           </div>
           <div className="stat">
             <span>Progress</span>
@@ -255,50 +426,26 @@ export default function App() {
           <div className="controls">
             <button
               type="button"
-              disabled={!connected || busyCommand === commandLabels.pause}
-              onClick={() =>
-                sendCommand({ type: "pause" }, commandLabels.pause)
-              }
+              disabled={!canPauseResume}
+              onClick={handlePauseResume}
             >
-              {commandLabels.pause}
-            </button>
-            <button
-              type="button"
-              disabled={!connected || busyCommand === commandLabels.resume}
-              onClick={() =>
-                sendCommand({ type: "resume" }, commandLabels.resume)
-              }
-            >
-              {commandLabels.resume}
+              {pauseResumeLabel}
             </button>
             <button
               type="button"
               className="danger"
-              disabled={!connected || busyCommand === commandLabels.stop}
-              onClick={() => sendCommand({ type: "stop" }, commandLabels.stop)}
+              disabled={!canStop}
+              onClick={handleStop}
             >
-              {commandLabels.stop}
+              {stopLabel}
             </button>
             <button
               type="button"
-              disabled={!connected || busyCommand === commandLabels.lightOn}
-              onClick={() =>
-                sendCommand({ type: "light", on: true }, commandLabels.lightOn)
-              }
+              aria-pressed={lightIsOn}
+              disabled={!canToggleLight}
+              onClick={handleLightToggle}
             >
-              {commandLabels.lightOn}
-            </button>
-            <button
-              type="button"
-              disabled={!connected || busyCommand === commandLabels.lightOff}
-              onClick={() =>
-                sendCommand(
-                  { type: "light", on: false },
-                  commandLabels.lightOff,
-                )
-              }
-            >
-              {commandLabels.lightOff}
+              {lightButtonLabel}
             </button>
           </div>
           {error && <p className="error">{error}</p>}
@@ -306,4 +453,60 @@ export default function App() {
       </section>
     </div>
   );
+}
+
+function normalizeJobState(value) {
+  if (!value) {
+    return "unknown";
+  }
+  const text = String(value).toUpperCase();
+  switch (text) {
+    case "RUNNING":
+    case "PRINTING":
+      return "printing";
+    case "PAUSE":
+    case "PAUSED":
+      return "paused";
+    case "IDLE":
+    case "STOPPED":
+      return "idle";
+    case "FINISH":
+    case "FINISHED":
+      return "finished";
+    case "FAILED":
+      return "error";
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeLight(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value).toLowerCase();
+  if (text === "on") {
+    return true;
+  }
+  if (text === "off") {
+    return false;
+  }
+  return null;
+}
+
+function formatJobState(rawValue, normalized) {
+  switch (normalized) {
+    case "printing":
+      return "Printing";
+    case "paused":
+      return "Paused";
+    case "idle":
+      return "Idle";
+    case "finished":
+      return "Finished";
+    case "error":
+      return "Error";
+    default:
+      return rawValue ?? "UNKNOWN";
+  }
 }
