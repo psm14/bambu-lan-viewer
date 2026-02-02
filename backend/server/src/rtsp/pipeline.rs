@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{AppConfig, PrinterConfig};
 use crate::rtsp::auth::RtspCredentials;
 use crate::rtsp::client::RtspClient;
 use crate::rtsp::depacketizer::H264RtpDepacketizer;
@@ -14,14 +14,18 @@ use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use url::Url;
 
-pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
-    let output_dir = PathBuf::from(config.hls_output_dir.clone());
+pub async fn run_rtsp_hls(
+    settings: AppConfig,
+    printer: PrinterConfig,
+    state: Arc<RwLock<PrinterState>>,
+    output_dir: PathBuf,
+) {
     let mut segmenter = match HlsSegmenter::new(
         output_dir,
-        config.hls_target_duration_secs,
-        config.hls_window_segments,
-        config.hls_low_latency,
-        config.hls_part_duration_secs,
+        settings.hls_target_duration_secs,
+        settings.hls_window_segments,
+        settings.hls_low_latency,
+        settings.hls_part_duration_secs,
     )
     .await
     {
@@ -35,7 +39,7 @@ pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
     let mut warned_missing = false;
 
     loop {
-        let url = match resolve_rtsp_url(&config, &state).await {
+        let url = match resolve_rtsp_url(&printer, &state).await {
             Some(url) => {
                 warned_missing = false;
                 url
@@ -50,7 +54,7 @@ pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
             }
         };
 
-        if let Err(error) = run_session(&config, &mut segmenter, url).await {
+        if let Err(error) = run_session(&settings, &printer, &mut segmenter, url).await {
             warn!(?error, "rtsp session ended");
         }
         sleep(Duration::from_secs(2)).await;
@@ -58,16 +62,17 @@ pub async fn run_rtsp_hls(config: Config, state: Arc<RwLock<PrinterState>>) {
 }
 
 async fn run_session(
-    config: &Config,
+    settings: &AppConfig,
+    printer: &PrinterConfig,
     segmenter: &mut HlsSegmenter,
     url: Url,
 ) -> anyhow::Result<()> {
     let credentials = Some(RtspCredentials {
         username: "bblp".to_string(),
-        password: config.printer_access_code.clone(),
+        password: printer.access_code.clone(),
     });
     info!(%url, "starting rtsp session");
-    let client = RtspClient::new(url.clone(), credentials, config.rtsp_tls_insecure);
+    let client = RtspClient::new(url.clone(), credentials, settings.rtsp_tls_insecure);
     let mut session = client.start().await?;
 
     if let (Some(sps), Some(pps)) = (session.sdp.sps.clone(), session.sdp.pps.clone()) {
@@ -138,8 +143,11 @@ async fn run_session(
     Ok(())
 }
 
-async fn resolve_rtsp_url(config: &Config, state: &Arc<RwLock<PrinterState>>) -> Option<Url> {
-    if let Some(url) = config.rtsp_url.as_ref() {
+async fn resolve_rtsp_url(
+    printer: &PrinterConfig,
+    state: &Arc<RwLock<PrinterState>>,
+) -> Option<Url> {
+    if let Some(url) = printer.rtsp_url.as_ref() {
         return Url::parse(url).ok();
     }
 

@@ -1,17 +1,20 @@
 mod commands;
 mod config;
+mod db;
 mod http;
 mod mqtt;
+mod printers;
 mod rtsp;
 mod state;
 mod tls;
 
-use crate::config::Config;
+use crate::config::AppConfig;
 use crate::http::AppState;
-use crate::state::PrinterState;
+use crate::printers::PrinterRuntime;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::RwLock;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -24,29 +27,19 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let _ = dotenvy::dotenv();
-    let config = Config::from_env()?;
-    let printer_state = Arc::new(RwLock::new(PrinterState::default()));
-    let (status_tx, _status_rx) = watch::channel(PrinterState::default());
-    let (command_tx, command_rx) = mpsc::channel(32);
-
-    let mqtt_state = Arc::clone(&printer_state);
-    let mqtt_config = config.clone();
-    let mqtt_status_tx = status_tx.clone();
-    tokio::spawn(async move {
-        mqtt::run(mqtt_config, mqtt_state, command_rx, mqtt_status_tx).await;
-    });
-
-    let video_config = config.clone();
-    let video_state = Arc::clone(&printer_state);
-    tokio::spawn(async move {
-        rtsp::run_rtsp_hls(video_config, video_state).await;
-    });
+    let config = AppConfig::from_env()?;
+    let db = db::init(&config.database_url).await?;
+    let printers = db::list_printers(&db).await?;
+    let mut runtime_map: HashMap<i64, Arc<PrinterRuntime>> = HashMap::new();
+    for printer in printers {
+        let runtime = PrinterRuntime::spawn(printer.clone(), &config);
+        runtime_map.insert(printer.id, runtime);
+    }
 
     let app_state = Arc::new(AppState {
-        printer_state,
-        command_tx,
-        status_tx,
-        hls_dir: std::path::PathBuf::from(&config.hls_output_dir),
+        config,
+        db,
+        printers: Arc::new(RwLock::new(runtime_map)),
     });
     let app = http::router(app_state);
 

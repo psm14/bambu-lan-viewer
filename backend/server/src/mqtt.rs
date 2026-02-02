@@ -1,5 +1,5 @@
 use crate::commands::CommandRequest;
-use crate::config::Config;
+use crate::config::{AppConfig, PrinterConfig};
 use crate::state::PrinterState;
 use crate::tls;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport};
@@ -10,17 +10,18 @@ use tokio::sync::{mpsc, watch, RwLock};
 use tracing::{info, warn};
 
 pub async fn run(
-    config: Config,
+    settings: AppConfig,
+    printer: PrinterConfig,
     state: Arc<RwLock<PrinterState>>,
     mut command_rx: mpsc::Receiver<CommandRequest>,
     status_tx: watch::Sender<PrinterState>,
 ) {
-    let report_topic = format!("device/{}/report", config.printer_serial);
-    let request_topic = format!("device/{}/request", config.printer_serial);
+    let report_topic = format!("device/{}/report", printer.serial);
+    let request_topic = format!("device/{}/request", printer.serial);
     let mut sequence_id: u64 = 1;
 
     loop {
-        let mqtt_options = build_mqtt_options(&config);
+        let mqtt_options = build_mqtt_options(&settings, &printer);
         let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
 
         if let Err(error) = client
@@ -68,7 +69,7 @@ pub async fn run(
                         info!("command channel closed; shutting down mqtt task");
                         return;
                     };
-                    let payload = command.to_payload(&config.mqtt_user_id, sequence_id);
+                    let payload = command.to_payload(&settings.mqtt_user_id, sequence_id);
                     sequence_id = sequence_id.wrapping_add(1);
                     let payload_bytes = match serde_json::to_vec(&payload) {
                         Ok(bytes) => bytes,
@@ -92,13 +93,13 @@ pub async fn run(
     }
 }
 
-fn build_mqtt_options(config: &Config) -> MqttOptions {
+fn build_mqtt_options(config: &AppConfig, printer: &PrinterConfig) -> MqttOptions {
     let mut options = MqttOptions::new(
-        config.mqtt_client_id.clone(),
-        config.printer_host.clone(),
+        format!("{}-{}", config.mqtt_client_id, printer.serial),
+        printer.host.clone(),
         config.mqtt_port,
     );
-    options.set_credentials("bblp", &config.printer_access_code);
+    options.set_credentials("bblp", &printer.access_code);
     options.set_keep_alive(Duration::from_secs(config.mqtt_keep_alive_secs));
     options.set_max_packet_size(
         config.mqtt_max_incoming_packet_size,

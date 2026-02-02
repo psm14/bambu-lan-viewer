@@ -14,6 +14,7 @@
   * parking_lot or tokio::sync (state sharing)
 * [x] create `frontend/` react app (vite)
 * [x] add hls.js dependency for non-safari playback
+* [x] add sqlite-backed printer registry (multi-printer support)
 * [ ] add top-level `docker-compose.yml`
 * [ ] add `cloudflared/` with template config or rely on tunnel token
 
@@ -34,13 +35,19 @@
     * light on/off (system.ledctrl with required fields)
 * [x] implement `backend/src/http.rs` (axum routes)
 
-  * `GET /api/status`
-  * `POST /api/command`
+  * `GET /api/printers`
+  * `POST /api/printers`
+  * `GET /api/printers/:id`
+  * `PUT /api/printers/:id`
+  * `DELETE /api/printers/:id`
+  * `GET /api/printers/:id/status`
+  * `POST /api/printers/:id/command`
   * `GET /healthz`
 * [x] frontend:
 
-  * subscribe to `/api/status/stream` (SSE) for updates
-  * buttons call `/api/command`
+  * subscribe to `/api/printers/:id/status/stream` (SSE) for updates
+  * buttons call `/api/printers/:id/command`
+  * add printer selector + add/edit drawer
 
 ## phase 2: rtsp ingest to access units (still no hls)
 
@@ -72,8 +79,8 @@
   * [x] delete segments older than window
 * [x] serve hls:
 
-  * [x] `GET /hls/stream.m3u8` from disk
-  * [x] `GET /hls/:segment.ts` from disk
+  * [x] `GET /hls/:id/stream.m3u8` from disk
+  * [x] `GET /hls/:id/:segment.ts` from disk
   * [x] set content-types:
 
     * m3u8: `application/vnd.apple.mpegurl`
@@ -85,13 +92,13 @@
 * [x] add `<video>` component
 * [x] safari path:
 
-  * if `video.canPlayType('application/vnd.apple.mpegurl')` is truthy, set `src=/hls/stream.m3u8`
+  * if `video.canPlayType('application/vnd.apple.mpegurl')` is truthy, set `src=/hls/:id/stream.m3u8`
 * [x] else use hls.js:
 
   * attach media
-  * loadSource `/hls/stream.m3u8`
+  * loadSource `/hls/:id/stream.m3u8`
 * [x] add UI toggle “compatibility mode” / “reload video”
-* [x] show stale indicator if `/api/status.lastUpdate` old
+* [x] show stale indicator if `/api/printers/:id/status.lastUpdate` old
 
 ## phase 5: docker-compose + cloudflared
 
@@ -129,5 +136,5 @@
 
 ## stretch goal: ll-hls (now available)
 
-* [x] emit ll-hls playlist (`/hls/stream_ll.m3u8`) with `#EXT-X-PART` byte-range parts
+* [x] emit ll-hls playlist (`/hls/:id/stream_ll.m3u8`) with `#EXT-X-PART` byte-range parts
 * [ ] true cmaf/fmp4 ll-hls (future)

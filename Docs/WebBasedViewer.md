@@ -4,14 +4,14 @@
 
 a small self-hosted web app that:
 
-* connects to your bambu printer over lan/vpn
+* connects to your bambu printers over lan/vpn
 * reads print status + controls over mqtt
 * ingests the camera stream via rtsp/rtsps
 * republishes video as **regular hls** (mpeg-ts) for browser playback
 * runs behind cloudflare zero trust (auth handled externally)
 * deploys via docker-compose: backend, frontend (static), cloudflared
 
-stretch goal later: ll-hls.
+ll-hls optional (see section 3b).
 
 ---
 
@@ -33,6 +33,10 @@ stretch goal later: ll-hls.
 
 ### backend responsibilities (rust, tokio)
 
+* printer registry:
+
+  * sqlite-backed list of printer configs (name, ip, serial, access code)
+  * per-printer workers for mqtt + rtsp + hls
 * mqtt client:
 
   * connect to printer (ip, serial, lan access code)
@@ -50,19 +54,26 @@ stretch goal later: ll-hls.
   * serve `stream.m3u8` + `segNNNN.ts`
 * http api (axum):
 
-  * `GET /api/status` (latest printer state)
-  * `GET /api/status/stream` (server-sent events status stream)
-  * `POST /api/command` (pause/resume/stop/light)
-  * `GET /hls/stream.m3u8`
-  * `GET /hls/segXXXX.ts`
+  * `GET /api/printers` (list printers)
+  * `POST /api/printers` (create printer)
+  * `GET /api/printers/:id` (fetch printer)
+  * `PUT /api/printers/:id` (update printer)
+  * `DELETE /api/printers/:id` (remove printer)
+  * `GET /api/printers/:id/status` (latest printer state)
+  * `GET /api/printers/:id/status/stream` (server-sent events status stream)
+  * `POST /api/printers/:id/command` (pause/resume/stop/light)
+  * `GET /hls/:id/stream.m3u8`
+  * `GET /hls/:id/stream_ll.m3u8`
+  * `GET /hls/:id/segXXXX.ts`
   * `GET /healthz`
 
 ### frontend responsibilities (react)
 
 * show status and controls
+* manage printers list (add/edit/switch) via `/api/printers`
 * play video:
 
-  * safari/ios: native `<video src="/hls/stream.m3u8">`
+* safari/ios: native `<video src="/hls/:id/stream.m3u8">`
   * chrome/firefox/edge: use **hls.js** (mse)
 
 ### deployment
@@ -71,6 +82,12 @@ stretch goal later: ll-hls.
 * frontend container serves static build (e.g. nginx/caddy) on internal network
 * cloudflared tunnels external hostnames to these internal services
 * no app-level auth (rely on zero trust)
+
+### configuration
+
+* `DATABASE_URL` (or `DB_PATH`): sqlite path for printer configs (default `data/printers.db`)
+  * container-friendly example: `sqlite:///data/printers.db`
+* `HLS_OUTPUT_DIR`: base directory; each printer writes to `HLS_OUTPUT_DIR/<printerId>/`
 
 ---
 
@@ -114,15 +131,15 @@ start with **disk**. it’s robust and easy.
 
 backend can emit a low-latency playlist alongside the standard one:
 
-* standard: `GET /hls/stream.m3u8`
-* low-latency: `GET /hls/stream_ll.m3u8`
+* standard: `GET /hls/:id/stream.m3u8`
+* low-latency: `GET /hls/:id/stream_ll.m3u8`
 
 ll-hls settings (env):
 
 * `HLS_LOW_LATENCY` (default true)
 * `HLS_PART_DURATION_SECS` (default `0.333`)
 
-frontend (hls.js) prefers the ll-hls playlist and will fall back to the standard playlist if the ll playlist is missing.
+frontend (hls.js) prefers the ll-hls playlist for the selected printer and will fall back to the standard playlist if the ll playlist is missing.
 
 note: the ll-hls playlist uses mpeg-ts byte-range parts (no cmaf/fmp4), so safari stays on the standard playlist for now.
 
@@ -193,9 +210,44 @@ backend should:
 
 ## 7) api contract
 
+### printers
+
+`GET /api/printers`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Studio X1",
+    "host": "192.168.1.10",
+    "serial": "00M1234ABC",
+    "accessCode": "12345678",
+    "rtspUrl": null
+  }
+]
+```
+
+`POST /api/printers`
+
+```json
+{
+  "name": "Studio X1",
+  "host": "192.168.1.10",
+  "serial": "00M1234ABC",
+  "accessCode": "12345678",
+  "rtspUrl": "rtsps://..."
+}
+```
+
+`GET /api/printers/:id`
+
+`PUT /api/printers/:id` (same shape as POST; `accessCode` optional to keep current)
+
+`DELETE /api/printers/:id` → `204 No Content`
+
 ### status
 
-`GET /api/status`
+`GET /api/printers/:id/status`
 
 ```json
 {
@@ -211,14 +263,14 @@ backend should:
 }
 ```
 
-`GET /api/status/stream` (server-sent events)
+`GET /api/printers/:id/status/stream` (server-sent events)
 
 * event: `status`
-* data: JSON payload matching `GET /api/status`
+* data: JSON payload matching `GET /api/printers/:id/status`
 
 ### commands
 
-`POST /api/command`
+`POST /api/printers/:id/command`
 
 ```json
 { "type": "pause" }
@@ -235,8 +287,9 @@ responses:
 
 ### video
 
-* `GET /hls/stream.m3u8`
-* `GET /hls/seg000123.ts`
+* `GET /hls/:id/stream.m3u8`
+* `GET /hls/:id/stream_ll.m3u8`
+* `GET /hls/:id/seg000123.ts`
 
 ---
 
@@ -245,7 +298,7 @@ responses:
 * `backend`:
 
   * exposes `8080` internally
-  * volume mount `./data/hls:/data/hls` (or a docker volume)
+  * volume mount `./data:/data` (sqlite db at `/data/printers.db`, hls at `/data/hls`)
 * `frontend`:
 
   * serves build on `8080` internally

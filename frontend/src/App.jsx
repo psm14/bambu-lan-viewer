@@ -8,7 +8,17 @@ const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 5000;
 const LIGHT_TIMEOUT_MS = 3000;
 const LOW_LATENCY_DEFAULT =
-  String(import.meta.env.VITE_HLS_LOW_LATENCY ?? "true").toLowerCase() === "true";
+  String(import.meta.env.VITE_HLS_LOW_LATENCY ?? "true").toLowerCase() ===
+  "true";
+
+const EMPTY_FORM = {
+  id: null,
+  name: "",
+  host: "",
+  serial: "",
+  accessCode: "",
+  rtspUrl: "",
+};
 
 function formatTemp(value) {
   if (value == null || Number.isNaN(value)) {
@@ -32,6 +42,18 @@ function formatPercent(value) {
 }
 
 export default function App() {
+  const [printers, setPrinters] = useState([]);
+  const [selectedPrinterId, setSelectedPrinterId] = useState(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const stored = window.localStorage.getItem("selectedPrinterId");
+    if (!stored) {
+      return null;
+    }
+    const value = Number(stored);
+    return Number.isNaN(value) ? null : value;
+  });
   const [status, setStatus] = useState(null);
   const [error, setError] = useState("");
   const [videoError, setVideoError] = useState("");
@@ -40,24 +62,81 @@ export default function App() {
   const [pendingLightToken, setPendingLightToken] = useState(null);
   const [videoReload, setVideoReload] = useState(0);
   const [useLowLatency, setUseLowLatency] = useState(LOW_LATENCY_DEFAULT);
+  const [showManager, setShowManager] = useState(false);
+  const [formState, setFormState] = useState(EMPTY_FORM);
+  const [formError, setFormError] = useState("");
+  const [savingPrinter, setSavingPrinter] = useState(false);
+  const [loadingPrinters, setLoadingPrinters] = useState(true);
+
   const videoRef = useRef(null);
   const pendingJobTokenRef = useRef(null);
   const pendingJobTimeoutRef = useRef(null);
   const pendingLightTokenRef = useRef(null);
   const pendingLightTimeoutRef = useRef(null);
 
-  const baseHlsUrl = `${API_BASE}/hls/stream.m3u8`;
-  const llHlsUrl = `${API_BASE}/hls/stream_ll.m3u8`;
+  const selectedPrinter =
+    printers.find((printer) => printer.id === selectedPrinterId) ?? null;
+  const baseHlsUrl = selectedPrinterId
+    ? `${API_BASE}/hls/${selectedPrinterId}/stream.m3u8`
+    : "";
+  const llHlsUrl = selectedPrinterId
+    ? `${API_BASE}/hls/${selectedPrinterId}/stream_ll.m3u8`
+    : "";
   const hlsUrl = useLowLatency ? llHlsUrl : baseHlsUrl;
+
+  const loadPrinters = async () => {
+    setLoadingPrinters(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/printers`);
+      if (!response.ok) {
+        throw new Error("printer list fetch failed");
+      }
+      const data = await response.json();
+      setPrinters(Array.isArray(data) ? data : []);
+      const found = data?.find?.((printer) => printer.id === selectedPrinterId);
+      if (!found) {
+        const fallback = data?.[0]?.id ?? null;
+        setSelectedPrinterId(fallback);
+      }
+    } catch (err) {
+      setError("Unable to reach backend");
+    } finally {
+      setLoadingPrinters(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPrinters();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (selectedPrinterId == null) {
+      window.localStorage.removeItem("selectedPrinterId");
+      return;
+    }
+    window.localStorage.setItem("selectedPrinterId", String(selectedPrinterId));
+  }, [selectedPrinterId]);
 
   useEffect(() => {
     let isActive = true;
     let eventSource = null;
     let pollTimer = null;
 
+    if (!selectedPrinterId) {
+      setStatus(null);
+      setError("");
+      return () => {};
+    }
+
+    const statusUrl = `${API_BASE}/api/printers/${selectedPrinterId}/status`;
+    const streamUrl = `${API_BASE}/api/printers/${selectedPrinterId}/status/stream`;
+
     const fetchStatus = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/status`);
+        const response = await fetch(statusUrl);
         if (!response.ok) {
           throw new Error("status fetch failed");
         }
@@ -91,7 +170,7 @@ export default function App() {
       };
     }
 
-    eventSource = new EventSource(`${API_BASE}/api/status/stream`);
+    eventSource = new EventSource(streamUrl);
     eventSource.addEventListener("status", (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -115,7 +194,7 @@ export default function App() {
         clearInterval(pollTimer);
       }
     };
-  }, []);
+  }, [selectedPrinterId]);
 
   useEffect(() => {
     return () => {
@@ -134,6 +213,13 @@ export default function App() {
       return;
     }
     setVideoError("");
+
+    if (!hlsUrl) {
+      setVideoError("Select a printer to load video");
+      video.removeAttribute("src");
+      video.load();
+      return () => {};
+    }
 
     const onVideoError = () => {
       setVideoError("Video element error");
@@ -218,7 +304,8 @@ export default function App() {
   const lightIsOn = lightOverride ?? lightFromStatus ?? false;
   const canPauseResume =
     connected && pendingJobAction == null && (isPrinting || isPaused);
-  const canStop = connected && pendingJobAction == null && (isPrinting || isPaused);
+  const canStop =
+    connected && pendingJobAction == null && (isPrinting || isPaused);
   const canToggleLight = connected && pendingLightToken == null;
   const pauseResumeLabel = pendingJobAction
     ? pendingJobAction === "pause"
@@ -253,13 +340,26 @@ export default function App() {
     clearPendingLight();
   }, [status?.light]);
 
+  useEffect(() => {
+    clearPendingJob();
+    clearPendingLight();
+    setVideoReload((value) => value + 1);
+  }, [selectedPrinterId]);
+
   const sendCommand = async (payload) => {
+    if (!selectedPrinterId) {
+      setError("Select a printer first");
+      return false;
+    }
     try {
-      const response = await fetch(`${API_BASE}/api/command`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${API_BASE}/api/printers/${selectedPrinterId}/command`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.ok === false) {
         throw new Error(data.error || "command failed");
@@ -395,7 +495,112 @@ export default function App() {
     }
   };
 
-  const jobStateDisplay = formatJobState(jobState, normalizedJobState);
+  const handleSavePrinter = async (event) => {
+    event.preventDefault();
+    setFormError("");
+
+    const name = formState.name.trim();
+    const host = formState.host.trim();
+    const serial = formState.serial.trim();
+    const accessCode = formState.accessCode.trim();
+    const rtspUrl = formState.rtspUrl.trim();
+
+    if (!name || !host || !serial) {
+      setFormError("Name, host, and serial are required");
+      return;
+    }
+
+    if (!formState.id && !accessCode) {
+      setFormError("Access code is required");
+      return;
+    }
+
+    const payload = {
+      name,
+      host,
+      serial,
+      rtspUrl,
+    };
+
+    if (accessCode) {
+      payload.accessCode = accessCode;
+    }
+
+    setSavingPrinter(true);
+    try {
+      const endpoint = formState.id
+        ? `${API_BASE}/api/printers/${formState.id}`
+        : `${API_BASE}/api/printers`;
+      const method = formState.id ? "PUT" : "POST";
+      const response = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to save printer");
+      }
+      await loadPrinters();
+      if (!formState.id && data?.id) {
+        setSelectedPrinterId(data.id);
+      }
+      setFormState(EMPTY_FORM);
+      setFormError("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Unable to save printer");
+    } finally {
+      setSavingPrinter(false);
+    }
+  };
+
+  const beginEditPrinter = (printer) => {
+    setFormState({
+      id: printer.id,
+      name: printer.name ?? "",
+      host: printer.host ?? "",
+      serial: printer.serial ?? "",
+      accessCode: "",
+      rtspUrl: printer.rtspUrl ?? "",
+    });
+    setFormError("");
+    setShowManager(true);
+  };
+
+  const handleDeletePrinter = async (printerId) => {
+    const confirmDelete = window.confirm(
+      "Delete this printer configuration?",
+    );
+    if (!confirmDelete) {
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/printers/${printerId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok && response.status !== 204) {
+        throw new Error("Unable to delete printer");
+      }
+      await loadPrinters();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete printer");
+    }
+  };
+
+  const closeManager = () => {
+    setShowManager(false);
+    setFormState(EMPTY_FORM);
+    setFormError("");
+  };
+
+  const jobStateDisplay = selectedPrinterId
+    ? formatJobState(jobState, normalizedJobState)
+    : "--";
+  const statusLabel = selectedPrinterId
+    ? connected
+      ? "MQTT Connected"
+      : "Offline"
+    : "No Printer";
 
   return (
     <div className="app">
@@ -408,8 +613,41 @@ export default function App() {
             streaming is live via HLS.
           </p>
         </div>
-        <div className={`pill ${connected ? "ok" : "warn"}`}>
-          {connected ? "MQTT Connected" : "Offline"}
+        <div className="hero-side">
+          <div className="printer-picker">
+            <div className="picker-header">
+              <span>Active Printer</span>
+              <button type="button" onClick={() => setShowManager(true)}>
+                Manage
+              </button>
+            </div>
+            <select
+              value={selectedPrinterId ?? ""}
+              onChange={(event) =>
+                setSelectedPrinterId(
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+              disabled={!printers.length || loadingPrinters}
+            >
+              {!printers.length && (
+                <option value="">No printers yet</option>
+              )}
+              {printers.map((printer) => (
+                <option key={printer.id} value={printer.id}>
+                  {printer.name}
+                </option>
+              ))}
+            </select>
+            {selectedPrinter && (
+              <p className="printer-meta">
+                {selectedPrinter.host} • {selectedPrinter.serial}
+              </p>
+            )}
+          </div>
+          <div className={`pill ${connected ? "ok" : "warn"}`}>
+            {statusLabel}
+          </div>
         </div>
       </header>
 
@@ -420,6 +658,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setVideoReload((value) => value + 1)}
+              disabled={!selectedPrinterId}
             >
               Reload Video
             </button>
@@ -432,7 +671,11 @@ export default function App() {
             playsInline
             className="video"
           />
-          <p className="helper">Streaming via RTSPS -> HLS.</p>
+          <p className="helper">
+            {selectedPrinter
+              ? `Streaming ${selectedPrinter.name} via RTSPS → HLS.`
+              : "Add a printer to start streaming."}
+          </p>
           {videoError && <p className="error">{videoError}</p>}
         </div>
         <div className="card">
@@ -463,6 +706,9 @@ export default function App() {
           </div>
           {isStale && (
             <p className="stale-note">No updates for {staleSeconds}s.</p>
+          )}
+          {!selectedPrinterId && (
+            <p className="helper">Select a printer to view status.</p>
           )}
         </div>
 
@@ -512,6 +758,144 @@ export default function App() {
           {error && <p className="error">{error}</p>}
         </div>
       </section>
+
+      {showManager && (
+        <div className="drawer-backdrop" onClick={closeManager}>
+          <aside className="drawer" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-header">
+              <div>
+                <h2>Manage Printers</h2>
+                <p className="helper">
+                  Add or edit printer configs stored in the backend database.
+                </p>
+              </div>
+              <button type="button" onClick={closeManager}>
+                Close
+              </button>
+            </div>
+
+            <div className="drawer-section">
+              <h3>Configured Printers</h3>
+              {loadingPrinters && <p className="helper">Loading printers…</p>}
+              {!loadingPrinters && printers.length === 0 && (
+                <p className="helper">No printers added yet.</p>
+              )}
+              {printers.map((printer) => (
+                <div
+                  key={printer.id}
+                  className={`printer-row ${
+                    printer.id === selectedPrinterId ? "active" : ""
+                  }`}
+                >
+                  <div>
+                    <strong>{printer.name}</strong>
+                    <p className="printer-meta">
+                      {printer.host} • {printer.serial}
+                    </p>
+                  </div>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPrinterId(printer.id)}
+                    >
+                      Use
+                    </button>
+                    <button type="button" onClick={() => beginEditPrinter(printer)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => handleDeletePrinter(printer.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="drawer-section">
+              <h3>{formState.id ? "Edit Printer" : "Add Printer"}</h3>
+              <form className="printer-form" onSubmit={handleSavePrinter}>
+                <label>
+                  Name
+                  <input
+                    value={formState.name}
+                    onChange={(event) =>
+                      setFormState({ ...formState, name: event.target.value })
+                    }
+                    placeholder="Studio X1"
+                    required
+                  />
+                </label>
+                <label>
+                  Host / IP
+                  <input
+                    value={formState.host}
+                    onChange={(event) =>
+                      setFormState({ ...formState, host: event.target.value })
+                    }
+                    placeholder="192.168.1.10"
+                    required
+                  />
+                </label>
+                <label>
+                  Serial
+                  <input
+                    value={formState.serial}
+                    onChange={(event) =>
+                      setFormState({ ...formState, serial: event.target.value })
+                    }
+                    placeholder="00M1234ABC"
+                    required
+                  />
+                </label>
+                <label>
+                  Access Code
+                  <input
+                    type="password"
+                    value={formState.accessCode}
+                    onChange={(event) =>
+                      setFormState({
+                        ...formState,
+                        accessCode: event.target.value,
+                      })
+                    }
+                    placeholder={formState.id ? "Leave blank to keep" : "Required"}
+                  />
+                </label>
+                <label>
+                  RTSP URL (optional)
+                  <input
+                    value={formState.rtspUrl}
+                    onChange={(event) =>
+                      setFormState({ ...formState, rtspUrl: event.target.value })
+                    }
+                    placeholder="rtsps://..."
+                  />
+                </label>
+                {formError && <p className="error">{formError}</p>}
+                <div className="form-actions">
+                  <button type="submit" disabled={savingPrinter}>
+                    {savingPrinter
+                      ? "Saving..."
+                      : formState.id
+                        ? "Update Printer"
+                        : "Add Printer"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormState(EMPTY_FORM)}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
