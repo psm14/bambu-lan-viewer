@@ -1,4 +1,5 @@
 backend/target/
 backend/hls/
 backend/.env
+frontend/.env
 frontend/node_modules/
