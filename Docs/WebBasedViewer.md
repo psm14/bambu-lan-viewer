@@ -51,6 +51,7 @@ stretch goal later: ll-hls.
 * http api (axum):
 
   * `GET /api/status` (latest printer state)
+  * `GET /api/status/stream` (server-sent events status stream)
   * `POST /api/command` (pause/resume/stop/light)
   * `GET /hls/stream.m3u8`
   * `GET /hls/segXXXX.ts`
@@ -187,6 +188,11 @@ backend should:
   "lastUpdate": "2026-01-18T20:15:00Z"
 }
 ```
+
+`GET /api/status/stream` (server-sent events)
+
+* event: `status`
+* data: JSON payload matching `GET /api/status`
 
 ### commands
 

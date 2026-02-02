@@ -47,6 +47,8 @@ export default function App() {
 
   useEffect(() => {
     let isActive = true;
+    let eventSource = null;
+    let pollTimer = null;
 
     const fetchStatus = async () => {
       try {
@@ -66,11 +68,47 @@ export default function App() {
       }
     };
 
-    fetchStatus();
-    const timer = setInterval(fetchStatus, POLL_MS);
+    const handleStatus = (data) => {
+      if (isActive) {
+        setStatus(data);
+        setError("");
+      }
+    };
+
+    if (typeof EventSource === "undefined") {
+      fetchStatus();
+      pollTimer = setInterval(fetchStatus, POLL_MS);
+      return () => {
+        isActive = false;
+        if (pollTimer) {
+          clearInterval(pollTimer);
+        }
+      };
+    }
+
+    eventSource = new EventSource(`${API_BASE}/api/status/stream`);
+    eventSource.addEventListener("status", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        handleStatus(data);
+      } catch (err) {
+        // Ignore malformed events.
+      }
+    });
+    eventSource.onerror = () => {
+      if (isActive) {
+        setError("Unable to reach backend");
+      }
+    };
+
     return () => {
       isActive = false;
-      clearInterval(timer);
+      if (eventSource) {
+        eventSource.close();
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
     };
   }, []);
 
@@ -343,8 +381,8 @@ export default function App() {
           <p className="eyebrow">Bambu LAN Viewer</p>
           <h1>Printer Status + Controls</h1>
           <p className="subhead">
-            MQTT status polling with direct control commands. Video streaming
-            comes next.
+            MQTT status streamed over SSE with direct control commands. Video
+            streaming is live via HLS.
           </p>
         </div>
         <div className={`pill ${connected ? "ok" : "warn"}`}>

@@ -6,13 +6,14 @@ use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, 
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch, RwLock};
 use tracing::{info, warn};
 
 pub async fn run(
     config: Config,
     state: Arc<RwLock<PrinterState>>,
     mut command_rx: mpsc::Receiver<CommandRequest>,
+    status_tx: watch::Sender<PrinterState>,
 ) {
     let report_topic = format!("device/{}/report", config.printer_serial);
     let request_topic = format!("device/{}/request", config.printer_serial);
@@ -27,7 +28,7 @@ pub async fn run(
             .await
         {
             warn!(?error, "failed to subscribe to report topic");
-            set_connected(&state, false).await;
+            set_connected(&state, &status_tx, false).await;
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         }
@@ -39,13 +40,17 @@ pub async fn run(
                 event = eventloop.poll() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                            set_connected(&state, true).await;
+                            set_connected(&state, &status_tx, true).await;
                         }
                         Ok(Event::Incoming(Incoming::Publish(publish))) => {
                             if let Ok(report) = serde_json::from_slice::<Value>(&publish.payload) {
-                                let mut guard = state.write().await;
-                                guard.connected = true;
-                                guard.apply_report(&report);
+                                let snapshot = {
+                                    let mut guard = state.write().await;
+                                    guard.connected = true;
+                                    guard.apply_report(&report);
+                                    guard.clone()
+                                };
+                                let _ = status_tx.send(snapshot);
                             } else {
                                 warn!("failed to parse mqtt report payload");
                             }
@@ -53,7 +58,7 @@ pub async fn run(
                         Ok(_) => {}
                         Err(error) => {
                             warn!(?error, "mqtt connection error; reconnecting");
-                            set_connected(&state, false).await;
+                            set_connected(&state, &status_tx, false).await;
                             break;
                         }
                     }
@@ -122,10 +127,18 @@ fn build_mqtt_options(config: &Config) -> MqttOptions {
     options
 }
 
-async fn set_connected(state: &Arc<RwLock<PrinterState>>, connected: bool) {
-    let mut guard = state.write().await;
-    guard.connected = connected;
-    if !connected {
-        guard.last_update = None;
-    }
+async fn set_connected(
+    state: &Arc<RwLock<PrinterState>>,
+    status_tx: &watch::Sender<PrinterState>,
+    connected: bool,
+) {
+    let snapshot = {
+        let mut guard = state.write().await;
+        guard.connected = connected;
+        if !connected {
+            guard.last_update = None;
+        }
+        guard.clone()
+    };
+    let _ = status_tx.send(snapshot);
 }

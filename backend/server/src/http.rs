@@ -1,27 +1,33 @@
 use crate::commands::{CommandPayload, CommandRequest};
 use crate::state::PrinterState;
+use async_stream::stream;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Serialize;
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::time::Duration;
+use tokio::sync::{mpsc, watch, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 pub struct AppState {
     pub printer_state: Arc<RwLock<PrinterState>>,
     pub command_tx: mpsc::Sender<CommandRequest>,
+    pub status_tx: watch::Sender<PrinterState>,
     pub hls_dir: PathBuf,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
+        .route("/api/status/stream", get(get_status_stream))
         .route("/api/command", post(post_command))
         .route("/healthz", get(healthz))
         .route("/hls/stream.m3u8", get(get_playlist))
@@ -38,6 +44,37 @@ pub fn router(state: Arc<AppState>) -> Router {
 async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let snapshot = state.printer_state.read().await.clone();
     Json(snapshot)
+}
+
+async fn get_status_stream(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut rx = state.status_tx.subscribe();
+    let initial = rx.borrow_and_update().clone();
+
+    let stream = stream! {
+        yield Ok::<Event, Infallible>(
+            Event::default()
+                .event("status")
+                .data(serialize_status(&initial)),
+        );
+
+        loop {
+            if rx.changed().await.is_err() {
+                break;
+            }
+            let snapshot = rx.borrow().clone();
+            yield Ok::<Event, Infallible>(
+                Event::default()
+                    .event("status")
+                    .data(serialize_status(&snapshot)),
+            );
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
 }
 
 async fn post_command(
@@ -191,4 +228,8 @@ fn parse_range(range: &str, len: usize) -> Option<(usize, usize)> {
 struct CommandResponse {
     ok: bool,
     error: Option<String>,
+}
+
+fn serialize_status(state: &PrinterState) -> String {
+    serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string())
 }

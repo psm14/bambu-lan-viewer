@@ -39,7 +39,7 @@
   * `GET /healthz`
 * [x] frontend:
 
-  * poll `/api/status` every 2–5s
+  * subscribe to `/api/status/stream` (SSE) for updates
   * buttons call `/api/command`
 
 ## phase 2: rtsp ingest to access units (still no hls)
@@ -108,7 +108,7 @@
 
     * frontend reverse proxy (nginx) OR
     * separate hostname to backend
-* [ ] ensure websocket not required (hls + polling is plain http)
+* [ ] ensure websocket not required (hls + SSE is plain http)
 
 ## phase 6: hardening / polish
 

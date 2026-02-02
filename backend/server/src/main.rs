@@ -11,7 +11,7 @@ use crate::http::AppState;
 use crate::state::PrinterState;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch, RwLock};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -26,12 +26,14 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let config = Config::from_env()?;
     let printer_state = Arc::new(RwLock::new(PrinterState::default()));
+    let (status_tx, _status_rx) = watch::channel(PrinterState::default());
     let (command_tx, command_rx) = mpsc::channel(32);
 
     let mqtt_state = Arc::clone(&printer_state);
     let mqtt_config = config.clone();
+    let mqtt_status_tx = status_tx.clone();
     tokio::spawn(async move {
-        mqtt::run(mqtt_config, mqtt_state, command_rx).await;
+        mqtt::run(mqtt_config, mqtt_state, command_rx, mqtt_status_tx).await;
     });
 
     let video_config = config.clone();
@@ -43,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = Arc::new(AppState {
         printer_state,
         command_tx,
+        status_tx,
         hls_dir: std::path::PathBuf::from(&config.hls_output_dir),
     });
     let app = http::router(app_state);
