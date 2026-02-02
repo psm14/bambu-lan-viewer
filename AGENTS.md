@@ -1,7 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `Bambu LAN Viewer/`: SwiftUI app source (entry point in `Bambu_LAN_ViewerApp.swift`, UI in `ContentView.swift`).
+- `frontend/`: Webapp frontend (intended to become the primary interface).
+- `backend/`: Webapp backend (intended to become the primary interface).
+- `Bambu LAN Viewer/`: SwiftUI iOS app source kept for reference (entry point in `Bambu_LAN_ViewerApp.swift`, UI in `ContentView.swift`).
 - `Bambu LAN Viewer/Assets.xcassets/`: App icons and asset catalogs.
 - `Bambu LAN Viewer.xcodeproj/`: Xcode project configuration and schemes.
 - `MobileVLCKit.xcframework/`: Embedded VLC framework used for RTSP(S) video playback.
