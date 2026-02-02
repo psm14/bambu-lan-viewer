@@ -3,7 +3,7 @@ use anyhow::Context;
 use serde::Deserialize;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -217,15 +217,26 @@ fn ensure_parent_dir(database_url: &str) -> anyhow::Result<()> {
                 .with_context(|| format!("create db dir {:?}", parent))?;
         }
     }
+    if !path.exists() {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("create db file {:?}", path))?;
+    }
     Ok(())
 }
 
-fn sqlite_path_from_url(database_url: &str) -> Option<std::path::PathBuf> {
+fn sqlite_path_from_url(database_url: &str) -> Option<PathBuf> {
     if let Some(path) = database_url.strip_prefix("sqlite://") {
-        Some(std::path::PathBuf::from(path))
+        Some(PathBuf::from(strip_query(path)))
     } else if let Some(path) = database_url.strip_prefix("sqlite:") {
-        Some(std::path::PathBuf::from(path))
+        Some(PathBuf::from(strip_query(path)))
     } else {
         None
     }
+}
+
+fn strip_query(value: &str) -> &str {
+    value.split('?').next().unwrap_or(value)
 }
