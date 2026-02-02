@@ -36,15 +36,15 @@ async fn main() -> anyhow::Result<()> {
         runtime_map.insert(printer.id, runtime);
     }
 
+    let addr: SocketAddr = config.http_bind.parse()?;
+    info!(%addr, "http server listening");
+
     let app_state = Arc::new(AppState {
         config,
         db,
         printers: Arc::new(RwLock::new(runtime_map)),
     });
     let app = http::router(app_state);
-
-    let addr: SocketAddr = config.http_bind.parse()?;
-    info!(%addr, "http server listening");
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
