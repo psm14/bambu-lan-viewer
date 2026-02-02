@@ -136,5 +136,4 @@
 
 ## stretch goal: ll-hls (now available)
 
-* [x] emit ll-hls playlist (`/hls/:id/stream_ll.m3u8`) with `#EXT-X-PART` byte-range parts
-* [ ] true cmaf/fmp4 ll-hls (future)
+* [x] emit ll-hls playlist (`/hls/:id/stream_ll.m3u8`) with cmaf/fmp4 (`init.mp4` + `.m4s`)

@@ -307,7 +307,7 @@ async fn get_segment(
     if segment.contains('/') || segment.contains("..") {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let path = runtime.hls_dir.join(segment);
+    let path = runtime.hls_dir.join(&segment);
     match tokio::fs::read(path).await {
         Ok(bytes) => {
             let total_len = bytes.len();
@@ -328,10 +328,14 @@ async fn get_segment(
             let mut response = Response::new(Body::from(body));
             *response.status_mut() = status;
             let headers = response.headers_mut();
-            headers.insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("video/mp2t"),
-            );
+            let content_type = if segment.ends_with(".m4s") || segment.ends_with(".mp4") {
+                "video/mp4"
+            } else {
+                "video/mp2t"
+            };
+            if let Ok(value) = header::HeaderValue::from_str(content_type) {
+                headers.insert(header::CONTENT_TYPE, value);
+            }
             headers.insert(
                 header::CACHE_CONTROL,
                 header::HeaderValue::from_static("no-store"),

@@ -222,6 +222,11 @@ export default function App() {
     }
 
     const onVideoError = () => {
+      if (useLowLatency) {
+        setUseLowLatency(false);
+        setVideoReload((value) => value + 1);
+        return;
+      }
       setVideoError("Video element error");
     };
     video.addEventListener("error", onVideoError);
@@ -279,7 +284,7 @@ export default function App() {
     }
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = baseHlsUrl;
+      video.src = hlsUrl;
       return () => {
         video.removeEventListener("error", onVideoError);
         video.removeAttribute("src");

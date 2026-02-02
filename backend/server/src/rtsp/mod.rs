@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod client;
 pub mod depacketizer;
+pub mod cmaf;
 pub mod hls;
 pub mod parser;
 pub mod pipeline;

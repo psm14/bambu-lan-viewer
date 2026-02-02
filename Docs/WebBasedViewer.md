@@ -139,9 +139,15 @@ ll-hls settings (env):
 * `HLS_LOW_LATENCY` (default true)
 * `HLS_PART_DURATION_SECS` (default `0.333`)
 
+ll-hls output files:
+
+* playlist: `/hls/:id/stream_ll.m3u8`
+* init: `/hls/:id/init.mp4`
+* segments: `/hls/:id/segXXXXXX.m4s`
+
 frontend (hls.js) prefers the ll-hls playlist for the selected printer and will fall back to the standard playlist if the ll playlist is missing.
 
-note: the ll-hls playlist uses mpeg-ts byte-range parts (no cmaf/fmp4), so safari stays on the standard playlist for now.
+note: the ll-hls playlist is **cmaf/fmp4** (`init.mp4` + `.m4s` fragments). safari will use ll-hls when the low-latency toggle is on.
 
 frontend env:
 
