@@ -38,7 +38,7 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.65);
+    background: var(--surface);
     backdrop-filter: blur(6px);
 }
 
@@ -89,7 +89,7 @@
     width: 100%;
     aspect-ratio: 16 / 9;
     border-radius: 16px;
-    background: #141511;
+    background: var(--video-bg);
     border: 1px solid var(--border);
 }
 
@@ -137,7 +137,7 @@
 
 button {
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.9);
+    background: var(--surface-strong);
     color: var(--ink);
     border-radius: 12px;
     padding: 10px 14px;
@@ -150,7 +150,7 @@ button {
 
 button:hover {
     transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(29, 31, 26, 0.12);
+    box-shadow: var(--shadow-hover);
 }
 
 button:disabled {
@@ -161,13 +161,13 @@ button:disabled {
 }
 
 button.danger {
-    border-color: rgba(212, 90, 42, 0.5);
-    color: #b33d1a;
+    border-color: var(--danger-border);
+    color: var(--danger);
 }
 
 .error {
     margin-top: 16px;
-    color: #b33d1a;
+    color: var(--danger);
     font-weight: 600;
 }
 
