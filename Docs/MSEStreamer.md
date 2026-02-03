@@ -92,7 +92,7 @@ Browser Fetch Stream
 
 ```
 
-GET /api/video/cmaf
+GET /api/printers/:id/video/cmaf
 
 ```
 
@@ -100,10 +100,11 @@ GET /api/video/cmaf
 
 ```
 
-Content-Type: video/mp4
+Content-Type: video/mp4; codecs="avc1.XXXXXX"
 Cache-Control: no-store
 Connection: keep-alive
 Transfer-Encoding: chunked
+X-Codec: avc1.XXXXXX
 
 ```
 
@@ -210,11 +211,11 @@ const mediaSource = new ManagedMediaSource();
 video.src = URL.createObjectURL(mediaSource);
 
 mediaSource.addEventListener("sourceopen", async () => {
+  const res = await fetch(`/api/printers/${printerId}/video/cmaf`, { cache: "no-store" });
+  const codec = res.headers.get("x-codec") ?? "avc1.42E01E";
   const sb = mediaSource.addSourceBuffer(
-    'video/mp4; codecs="avc1.42E01E"'
+    `video/mp4; codecs="${codec}"`
   );
-
-  const res = await fetch("/api/video/cmaf", { cache: "no-store" });
   const reader = res.body.getReader();
 
   let buffer = new Uint8Array();

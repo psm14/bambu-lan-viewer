@@ -2,6 +2,7 @@ use crate::config::{AppConfig, PrinterConfig};
 use crate::rtsp::auth::RtspCredentials;
 use crate::rtsp::client::RtspClient;
 use crate::rtsp::cmaf::CmafSegmenter;
+use crate::rtsp::stream::CmafStream;
 use crate::rtsp::depacketizer::H264RtpDepacketizer;
 use crate::rtsp::rtp::RtpPacket;
 use crate::rtsp::time::RtpTimeMapper;
@@ -19,6 +20,7 @@ pub async fn run_rtsp_hls(
     printer: PrinterConfig,
     state: Arc<RwLock<PrinterState>>,
     output_dir: PathBuf,
+    stream: CmafStream,
 ) {
     let mut warned_missing = false;
 
@@ -46,6 +48,7 @@ pub async fn run_rtsp_hls(
             settings.hls_target_duration_secs,
             settings.hls_window_segments,
             settings.hls_part_duration_secs,
+            Some(stream.clone()),
         )
         .await
         {
@@ -81,6 +84,7 @@ async fn run_session(
 
     if let (Some(sps), Some(pps)) = (session.sdp.sps.clone(), session.sdp.pps.clone()) {
         cmaf_segmenter.set_parameter_sets(sps, pps);
+        cmaf_segmenter.ensure_init().await?;
     }
 
     let expected_payload = session.sdp.payload_type;
@@ -135,6 +139,7 @@ async fn run_session(
         }
         if let Some((sps, pps)) = depacketizer.take_parameter_sets() {
             cmaf_segmenter.set_parameter_sets(sps, pps);
+            cmaf_segmenter.ensure_init().await?;
         }
 
         for access_unit in access_units {

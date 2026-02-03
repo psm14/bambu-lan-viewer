@@ -54,6 +54,7 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState("");
   const [videoError, setVideoError] = useState("");
+  const [videoMode, setVideoMode] = useState("hls");
   const [pendingJobAction, setPendingJobAction] = useState(null);
   const [lightOverride, setLightOverride] = useState(null);
   const [pendingLightToken, setPendingLightToken] = useState(null);
@@ -75,7 +76,11 @@ export default function App() {
   const hlsUrl = selectedPrinterId
     ? `${API_BASE}/hls/${selectedPrinterId}/stream.m3u8`
     : "";
-  const playlistLabel = "LL-HLS (CMAF)";
+  const cmafUrl = selectedPrinterId
+    ? `${API_BASE}/api/printers/${selectedPrinterId}/video/cmaf`
+    : "";
+  const playlistLabel =
+    videoMode === "mse" ? "Chunked CMAF (MSE)" : "LL-HLS (CMAF)";
 
   const loadPrinters = async () => {
     setLoadingPrinters(true);
@@ -208,6 +213,7 @@ export default function App() {
     setVideoError("");
 
     if (!hlsUrl) {
+      setVideoMode("hls");
       setVideoError("Select a printer to load video");
       video.removeAttribute("src");
       video.load();
@@ -222,60 +228,255 @@ export default function App() {
     const isSafari =
       typeof navigator !== "undefined" && /Apple/.test(navigator.vendor);
 
-    if (Hls.isSupported() && !isSafari) {
-      const hls = new Hls({
-        enableWorker: true,
-        backBufferLength: 0,
-        lowLatencyMode: true,
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 3,
-        maxLiveSyncPlaybackRate: 1.5,
+    const waitForEvent = (target, name) =>
+      new Promise((resolve) => {
+        target.addEventListener(name, resolve, { once: true });
       });
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        const message = `HLS error: ${data.type} ${data.details} fatal=${data.fatal}`;
-        console.error(message, data);
-        if (data.fatal) {
-          setVideoError(message);
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              break;
+
+    const parseCodec = (value) => {
+      if (!value) {
+        return "";
+      }
+      const match = value.match(/codecs\\s*=\\s*\"?([^\";]+)\"?/i);
+      if (match?.[1]) {
+        return match[1].trim();
+      }
+      if (value.startsWith("avc1.")) {
+        return value.trim();
+      }
+      return "";
+    };
+
+    const setupMse = async (MSEClass, registerCleanup) => {
+      const abortController = new AbortController();
+      const mediaSource = new MSEClass();
+      const objectUrl = URL.createObjectURL(mediaSource);
+      let reader = null;
+      let sourceBuffer = null;
+      let closed = false;
+
+      const teardown = () => {
+        closed = true;
+        abortController.abort();
+        if (reader) {
+          reader.cancel().catch(() => {});
+        }
+        if (mediaSource.readyState === "open") {
+          try {
+            mediaSource.endOfStream();
+          } catch (err) {
+            // ignore
           }
         }
-      });
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(video);
-      return () => {
-        video.removeEventListener("error", onVideoError);
-        hls.destroy();
-      };
-    }
-
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsUrl;
-      return () => {
-        video.removeEventListener("error", onVideoError);
+        URL.revokeObjectURL(objectUrl);
         video.removeAttribute("src");
         video.load();
       };
-    }
+      registerCleanup(teardown);
 
-    setVideoError("HLS is not supported in this browser");
-    return () => {
-      video.removeEventListener("error", onVideoError);
+      try {
+        video.src = objectUrl;
+
+        const response = await fetch(cmafUrl, {
+          cache: "no-store",
+          signal: abortController.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error("CMAF stream failed");
+        }
+
+        const codecHeader =
+          response.headers.get("x-codec") ??
+          response.headers.get("content-type") ??
+          "";
+        const codec = parseCodec(codecHeader) || "avc1.42E01E";
+
+        if (mediaSource.readyState !== "open") {
+          await waitForEvent(mediaSource, "sourceopen");
+        }
+        sourceBuffer = mediaSource.addSourceBuffer(
+          `video/mp4; codecs="${codec}"`,
+        );
+        try {
+          sourceBuffer.mode = "sequence";
+        } catch (err) {
+          // Ignore if mode is not supported.
+        }
+        setVideoMode("mse");
+
+        const waitForUpdate = () => waitForEvent(sourceBuffer, "updateend");
+
+        const trimBuffer = () => {
+          if (!video.buffered || video.buffered.length === 0) {
+            return;
+          }
+          const end = video.buffered.end(video.buffered.length - 1);
+          if (end - video.currentTime > 2.0) {
+            const removeEnd = Math.max(0, video.currentTime - 0.5);
+            if (removeEnd > 0 && !sourceBuffer.updating) {
+              sourceBuffer.remove(0, removeEnd);
+            }
+          }
+        };
+
+        const appendWithBackpressure = async (chunk) => {
+          if (closed) {
+            return;
+          }
+          while (sourceBuffer.updating) {
+            await waitForUpdate();
+          }
+          sourceBuffer.appendBuffer(chunk);
+          await waitForUpdate();
+          trimBuffer();
+        };
+
+        reader = response.body.getReader();
+
+        let buffer = new Uint8Array();
+        let started = false;
+
+        const readU32BE = (buf) =>
+          new DataView(buf.buffer, buf.byteOffset, 4).getUint32(0);
+
+        const concat = (a, b) => {
+          const out = new Uint8Array(a.length + b.length);
+          out.set(a, 0);
+          out.set(b, a.length);
+          return out;
+        };
+
+        while (!closed) {
+          const { value, done } = await reader.read();
+          if (done || !value) {
+            break;
+          }
+
+          buffer = concat(buffer, value);
+
+          while (buffer.length >= 4) {
+            const len = readU32BE(buffer);
+            if (buffer.length < 4 + len) {
+              break;
+            }
+            const chunk = buffer.slice(4, 4 + len);
+            buffer = buffer.slice(4 + len);
+            await appendWithBackpressure(chunk);
+            if (!started) {
+              started = true;
+              if (video.buffered && video.buffered.length > 0) {
+                const liveEdge = video.buffered.end(video.buffered.length - 1);
+                if (Number.isFinite(liveEdge)) {
+                  video.currentTime = Math.max(0, liveEdge - 0.1);
+                }
+              }
+              video.play().catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        teardown();
+        throw err;
+      }
+
+      return teardown;
+    };
+
+    const setupHls = () => {
+      setVideoMode("hls");
+
+      if (Hls.isSupported() && !isSafari) {
+        const hls = new Hls({
+          enableWorker: true,
+          backBufferLength: 0,
+          lowLatencyMode: true,
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 3,
+          maxLiveSyncPlaybackRate: 1.5,
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          const message = `HLS error: ${data.type} ${data.details} fatal=${data.fatal}`;
+          console.error(message, data);
+          if (data.fatal) {
+            setVideoError(message);
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                break;
+            }
+          }
+        });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+        return () => {
+          hls.destroy();
+        };
+      }
+
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = hlsUrl;
+        return () => {
+          video.removeAttribute("src");
+          video.load();
+        };
+      }
+
+      setVideoError("HLS is not supported in this browser");
       video.removeAttribute("src");
       video.load();
+      return () => {};
     };
-  }, [hlsUrl, videoReload]);
+
+    let cleanup = () => {};
+    let cancelled = false;
+
+    const start = async () => {
+      const MSEClass =
+        typeof window !== "undefined"
+          ? (window.ManagedMediaSource ?? window.MediaSource)
+          : null;
+      const canUseMse =
+        !!MSEClass && (!isSafari || !!window.ManagedMediaSource);
+
+      if (canUseMse && cmafUrl) {
+        try {
+          cleanup = await setupMse(MSEClass, (value) => {
+            cleanup = value;
+          });
+          if (cancelled) {
+            cleanup();
+          }
+          return;
+          } catch (err) {
+            if (cancelled) {
+              return;
+            }
+            console.warn("CMAF MSE failed, falling back to HLS", err);
+          }
+        }
+
+      if (!cancelled) {
+        cleanup = setupHls();
+      }
+    };
+
+    start();
+
+    return () => {
+      cancelled = true;
+      cleanup();
+      video.removeEventListener("error", onVideoError);
+    };
+  }, [hlsUrl, cmafUrl, videoReload]);
 
   const connected = status?.connected === true;
   const jobState = status?.jobState ?? "UNKNOWN";
@@ -530,7 +731,9 @@ export default function App() {
       setFormState(EMPTY_FORM);
       setFormError("");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Unable to save printer");
+      setFormError(
+        err instanceof Error ? err.message : "Unable to save printer",
+      );
     } finally {
       setSavingPrinter(false);
     }
@@ -550,9 +753,7 @@ export default function App() {
   };
 
   const handleDeletePrinter = async (printerId) => {
-    const confirmDelete = window.confirm(
-      "Delete this printer configuration?",
-    );
+    const confirmDelete = window.confirm("Delete this printer configuration?");
     if (!confirmDelete) {
       return;
     }
@@ -612,9 +813,7 @@ export default function App() {
               }
               disabled={!printers.length || loadingPrinters}
             >
-              {!printers.length && (
-                <option value="">No printers yet</option>
-              )}
+              {!printers.length && <option value="">No printers yet</option>}
               {printers.map((printer) => (
                 <option key={printer.id} value={printer.id}>
                   {printer.name}
@@ -745,7 +944,10 @@ export default function App() {
 
       {showManager && (
         <div className="drawer-backdrop" onClick={closeManager}>
-          <aside className="drawer" onClick={(event) => event.stopPropagation()}>
+          <aside
+            className="drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="drawer-header">
               <div>
                 <h2>Manage Printers</h2>
@@ -784,7 +986,10 @@ export default function App() {
                     >
                       Use
                     </button>
-                    <button type="button" onClick={() => beginEditPrinter(printer)}>
+                    <button
+                      type="button"
+                      onClick={() => beginEditPrinter(printer)}
+                    >
                       Edit
                     </button>
                     <button
@@ -846,7 +1051,9 @@ export default function App() {
                         accessCode: event.target.value,
                       })
                     }
-                    placeholder={formState.id ? "Leave blank to keep" : "Required"}
+                    placeholder={
+                      formState.id ? "Leave blank to keep" : "Required"
+                    }
                   />
                 </label>
                 <label>
@@ -854,7 +1061,10 @@ export default function App() {
                   <input
                     value={formState.rtspUrl}
                     onChange={(event) =>
-                      setFormState({ ...formState, rtspUrl: event.target.value })
+                      setFormState({
+                        ...formState,
+                        rtspUrl: event.target.value,
+                      })
                     }
                     placeholder="rtsps://..."
                   />

@@ -1,4 +1,6 @@
 use crate::rtsp::depacketizer::AccessUnit;
+use crate::rtsp::stream::{CmafInit, CmafStream};
+use bytes::Bytes;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -20,6 +22,7 @@ pub struct CmafSegmenter {
     part_duration: f64,
     last_sample_duration: Option<u32>,
     fragment_sequence: u32,
+    stream: Option<CmafStream>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +72,7 @@ impl CmafSegmenter {
         target_duration: f64,
         window: usize,
         part_duration: f64,
+        stream: Option<CmafStream>,
     ) -> anyhow::Result<Self> {
         fs::create_dir_all(&output_dir).await?;
         let mut resolved_part_duration = part_duration;
@@ -92,12 +96,17 @@ impl CmafSegmenter {
             part_duration: resolved_part_duration,
             last_sample_duration: None,
             fragment_sequence: 1,
+            stream,
         })
     }
 
     pub fn set_parameter_sets(&mut self, sps: Vec<u8>, pps: Vec<u8>) {
         self.sps = Some(sps);
         self.pps = Some(pps);
+    }
+
+    pub async fn ensure_init(&mut self) -> anyhow::Result<()> {
+        self.write_init_if_needed().await
     }
 
     pub async fn push_access_unit(
@@ -232,8 +241,13 @@ impl CmafSegmenter {
         part_bytes.extend_from_slice(&styp);
         part_bytes.extend_from_slice(&moof);
         part_bytes.extend_from_slice(&mdat);
+        let part_bytes = Bytes::from(part_bytes);
 
-        current.file.write_all(&part_bytes).await?;
+        if let Some(stream) = &self.stream {
+            stream.send_fragment(part_bytes.clone());
+        }
+
+        current.file.write_all(part_bytes.as_ref()).await?;
         current.file.flush().await?;
 
         let byte_start = current.part_start_byte;
@@ -418,8 +432,20 @@ impl CmafSegmenter {
 
         let (width, height) = parse_sps_dimensions(&sps).unwrap_or((1280, 720));
         let init = build_init_mp4(&sps, &pps, width, height);
+        let codec = codec_string_from_sps(&sps);
+        let init_bytes = Bytes::from(init);
         let path = self.output_dir.join("init.mp4");
-        fs::write(&path, init).await?;
+        fs::write(&path, init_bytes.as_ref()).await?;
+        if let Some(stream) = &self.stream {
+            stream.update_init(CmafInit {
+                bytes: init_bytes.clone(),
+                codec,
+            });
+        }
+        debug!(
+            bytes = init_bytes.len(),
+            "cmaf init updated"
+        );
         self.last_init_sps = Some(sps);
         self.last_init_pps = Some(pps);
         Ok(())
@@ -732,6 +758,16 @@ fn build_avcc(sps: &[u8], pps: &[u8]) -> Vec<u8> {
     write_u16(&mut payload, pps.len() as u16);
     payload.extend_from_slice(pps);
     make_box(*b"avcC", payload)
+}
+
+fn codec_string_from_sps(sps: &[u8]) -> String {
+    let profile_idc = sps.get(1).copied().unwrap_or(0);
+    let profile_compat = sps.get(2).copied().unwrap_or(0);
+    let level_idc = sps.get(3).copied().unwrap_or(0);
+    format!(
+        "avc1.{:02X}{:02X}{:02X}",
+        profile_idc, profile_compat, level_idc
+    )
 }
 
 fn build_mvex() -> Vec<u8> {

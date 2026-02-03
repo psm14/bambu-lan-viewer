@@ -2,6 +2,7 @@ use crate::commands::CommandRequest;
 use crate::config::{AppConfig, PrinterConfig};
 use crate::mqtt;
 use crate::rtsp;
+use crate::rtsp::CmafStream;
 use crate::state::PrinterState;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct PrinterRuntime {
     pub status_tx: watch::Sender<PrinterState>,
     pub command_tx: mpsc::Sender<CommandRequest>,
     pub hls_dir: PathBuf,
+    pub cmaf_stream: CmafStream,
     mqtt_abort: AbortHandle,
     rtsp_abort: AbortHandle,
 }
@@ -25,6 +27,7 @@ impl PrinterRuntime {
         let (status_tx, _status_rx) = watch::channel(PrinterState::default());
         let (command_tx, command_rx) = mpsc::channel(32);
         let hls_dir = PathBuf::from(&settings.hls_output_dir).join(config.id.to_string());
+        let cmaf_stream = CmafStream::new();
 
         let mqtt_state = Arc::clone(&state);
         let mqtt_settings = settings.clone();
@@ -38,8 +41,16 @@ impl PrinterRuntime {
         let video_config = config.clone();
         let video_state = Arc::clone(&state);
         let video_hls_dir = hls_dir.clone();
+        let video_stream = cmaf_stream.clone();
         let rtsp_handle = tokio::spawn(async move {
-            rtsp::run_rtsp_hls(video_settings, video_config, video_state, video_hls_dir).await;
+            rtsp::run_rtsp_hls(
+                video_settings,
+                video_config,
+                video_state,
+                video_hls_dir,
+                video_stream,
+            )
+            .await;
         });
 
         Arc::new(Self {
@@ -48,6 +59,7 @@ impl PrinterRuntime {
             status_tx,
             command_tx,
             hls_dir,
+            cmaf_stream,
             mqtt_abort: mqtt_handle.abort_handle(),
             rtsp_abort: rtsp_handle.abort_handle(),
         })

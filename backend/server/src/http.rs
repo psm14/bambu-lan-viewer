@@ -4,6 +4,7 @@ use crate::db::{self, PrinterCreateRequest, PrinterUpdateRequest};
 use crate::printers::PrinterRuntime;
 use crate::state::PrinterState;
 use async_stream::stream;
+use bytes::Bytes;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -18,6 +19,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
+use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tower_http::cors::{Any, CorsLayer};
@@ -39,6 +41,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/printers/:id/status", get(get_status))
         .route("/api/printers/:id/status/stream", get(get_status_stream))
         .route("/api/printers/:id/command", post(post_command))
+        .route("/api/printers/:id/video/cmaf", get(get_cmaf_stream))
         .route("/hls/:id/stream.m3u8", get(get_playlist))
         .route("/hls/:id/:segment", get(get_segment))
         .route("/healthz", get(healthz))
@@ -53,7 +56,8 @@ pub fn router(state: Arc<AppState>) -> Router {
                     axum::http::Method::PUT,
                     axum::http::Method::DELETE,
                 ])
-                .allow_headers(Any),
+                .allow_headers(Any)
+                .expose_headers([header::HeaderName::from_static("x-codec")]),
         )
 }
 
@@ -190,12 +194,23 @@ async fn get_status_stream(
         }
     };
 
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keep-alive"),
-    )
-    .into_response()
+    let mut response = Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(15))
+                .text("keep-alive"),
+        )
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    response
 }
 
 async fn post_command(
@@ -420,6 +435,79 @@ async fn get_segment(
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+async fn get_cmaf_stream(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    tracing::debug!(printer_id = id, "cmaf stream requested");
+    let runtime = match runtime_for(&state, id).await {
+        Ok(runtime) => runtime,
+        Err(response) => return response.into_response(),
+    };
+
+    let mut subscription = runtime.cmaf_stream.subscribe();
+    let init = loop {
+        if let Some(init) = subscription.init_rx.borrow().clone() {
+            break init;
+        }
+        if subscription.init_rx.changed().await.is_err() {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+    };
+
+    tracing::debug!(
+        printer_id = id,
+        bytes = init.bytes.len(),
+        codec = %init.codec,
+        "cmaf stream init ready"
+    );
+
+    let content_type = format!("video/mp4; codecs=\"{}\"", init.codec);
+    let stream = stream! {
+        tracing::debug!(printer_id = id, "cmaf stream init sent");
+        yield Ok::<Bytes, Infallible>(frame_chunk(init.bytes.clone()));
+
+        loop {
+            match subscription.fragment_rx.recv().await {
+                Ok(fragment) => {
+                    yield Ok::<Bytes, Infallible>(frame_chunk(fragment));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    tracing::warn!("cmaf stream receiver lagged; closing connection");
+                    break;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    };
+
+    let mut response = Response::new(Body::wrap_stream(stream));
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    if let Ok(value) = header::HeaderValue::from_str(&content_type) {
+        headers.insert(header::CONTENT_TYPE, value);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("x-accel-buffering"),
+        header::HeaderValue::from_static("no"),
+    );
+    if let Ok(value) = header::HeaderValue::from_str(&init.codec) {
+        headers.insert(header::HeaderName::from_static("x-codec"), value);
+    }
+    response.into_response()
+}
+
+fn frame_chunk(payload: Bytes) -> Bytes {
+    let mut framed = Vec::with_capacity(4 + payload.len());
+    framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    framed.extend_from_slice(payload.as_ref());
+    Bytes::from(framed)
 }
 
 fn parse_range(range: &str, len: usize) -> Option<(usize, usize)> {
