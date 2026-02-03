@@ -42,6 +42,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/hls/:id/stream.m3u8", get(get_playlist))
         .route("/hls/:id/:segment", get(get_segment))
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .with_state(state)
         .layer(
             CorsLayer::new()
@@ -242,6 +243,15 @@ async fn post_command(
 
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
+}
+
+async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Err(error) = sqlx::query("SELECT 1").execute(&state.db).await {
+        tracing::error!(?error, "readyz database check failed");
+        return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable").into_response();
+    }
+
+    (StatusCode::OK, "ready").into_response()
 }
 
 async fn get_playlist(

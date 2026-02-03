@@ -10,10 +10,6 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml server/Cargo.toml
-RUN mkdir -p server/src \
-    && printf 'fn main() {}\n' > server/src/main.rs
-RUN cargo build --release -p bambu-lan-viewer-backend
-
 COPY server/src server/src
 RUN cargo build --release -p bambu-lan-viewer-backend
 
@@ -21,6 +17,7 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
         libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
