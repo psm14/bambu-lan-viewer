@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: sqlite:///data/printers.db
+      HLS_OUTPUT_DIR: /hls
+      HTTP_BIND: 0.0.0.0:8080
+    volumes:
+      - backend-data:/data
+    tmpfs:
+      - /hls
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    env_file:
+      - ./.cloudflared.env
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  backend-data:
