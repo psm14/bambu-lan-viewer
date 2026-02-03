@@ -296,26 +296,11 @@ export default function App() {
       let sourceBuffer = null;
       let closed = false;
 
-      const attachMediaSource = (mime) => {
+      const attachMediaSource = () => {
         if (isSafari) {
-          while (video.firstChild) {
-            video.removeChild(video.firstChild);
-          }
-          const mseSource = document.createElement("source");
-          mseSource.src = objectUrl;
-          mseSource.type = mime;
-          video.appendChild(mseSource);
-
-          if (hlsUrl) {
-            const hlsSource = document.createElement("source");
-            hlsSource.src = hlsUrl;
-            hlsSource.type = "application/vnd.apple.mpegurl";
-            video.appendChild(hlsSource);
-          }
-          video.load();
-          return;
+          video.disableRemotePlayback = true;
+          video.setAttribute("disableremoteplayback", "");
         }
-
         video.src = objectUrl;
       };
 
@@ -333,9 +318,8 @@ export default function App() {
           }
         }
         URL.revokeObjectURL(objectUrl);
-        while (video.firstChild) {
-          video.removeChild(video.firstChild);
-        }
+        video.disableRemotePlayback = false;
+        video.removeAttribute("disableremoteplayback");
         video.removeAttribute("src");
         video.load();
       };
@@ -362,7 +346,7 @@ export default function App() {
           }
         }
 
-        attachMediaSource(mime);
+        attachMediaSource();
 
         if (mediaSource.readyState !== "open") {
           await waitForEvent(mediaSource, "sourceopen");

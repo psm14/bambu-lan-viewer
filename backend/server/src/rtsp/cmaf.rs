@@ -442,10 +442,6 @@ impl CmafSegmenter {
                 codec,
             });
         }
-        debug!(
-            bytes = init_bytes.len(),
-            "cmaf init updated"
-        );
         self.last_init_sps = Some(sps);
         self.last_init_pps = Some(pps);
         Ok(())

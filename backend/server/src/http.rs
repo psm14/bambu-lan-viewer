@@ -206,10 +206,6 @@ async fn get_status_stream(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static("no-store"),
     );
-    headers.insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        header::HeaderValue::from_static("*"),
-    );
     response
 }
 
@@ -441,7 +437,6 @@ async fn get_cmaf_stream(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    tracing::debug!(printer_id = id, "cmaf stream requested");
     let runtime = match runtime_for(&state, id).await {
         Ok(runtime) => runtime,
         Err(response) => return response.into_response(),
@@ -457,16 +452,8 @@ async fn get_cmaf_stream(
         }
     };
 
-    tracing::debug!(
-        printer_id = id,
-        bytes = init.bytes.len(),
-        codec = %init.codec,
-        "cmaf stream init ready"
-    );
-
     let content_type = format!("video/mp4; codecs=\"{}\"", init.codec);
     let stream = stream! {
-        tracing::debug!(printer_id = id, "cmaf stream init sent");
         yield Ok::<Bytes, Infallible>(frame_chunk(init.bytes.clone()));
 
         loop {
