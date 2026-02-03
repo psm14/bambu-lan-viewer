@@ -6,7 +6,7 @@ use crate::rtsp::depacketizer::H264RtpDepacketizer;
 use crate::rtsp::rtp::RtpPacket;
 use crate::rtsp::time::RtpTimeMapper;
 use crate::state::PrinterState;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -20,21 +20,6 @@ pub async fn run_rtsp_hls(
     state: Arc<RwLock<PrinterState>>,
     output_dir: PathBuf,
 ) {
-    let mut cmaf_segmenter = match CmafSegmenter::new(
-        output_dir.clone(),
-        settings.hls_target_duration_secs,
-        settings.hls_window_segments,
-        settings.hls_part_duration_secs,
-    )
-    .await
-    {
-        Ok(segmenter) => segmenter,
-        Err(error) => {
-            warn!(?error, "failed to initialize cmaf segmenter");
-            return;
-        }
-    };
-
     let mut warned_missing = false;
 
     loop {
@@ -53,6 +38,24 @@ pub async fn run_rtsp_hls(
             }
         };
 
+        if let Err(error) = clean_output_dir(&output_dir).await {
+            warn!(?error, "failed to clean hls output directory");
+        }
+        let mut cmaf_segmenter = match CmafSegmenter::new(
+            output_dir.clone(),
+            settings.hls_target_duration_secs,
+            settings.hls_window_segments,
+            settings.hls_part_duration_secs,
+        )
+        .await
+        {
+            Ok(segmenter) => segmenter,
+            Err(error) => {
+                warn!(?error, "failed to initialize cmaf segmenter");
+                sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
         if let Err(error) =
             run_session(&settings, &printer, &mut cmaf_segmenter, url).await
         {
@@ -154,4 +157,22 @@ async fn resolve_rtsp_url(
 
     let rtsp_url = state.read().await.rtsp_url.clone()?;
     Url::parse(&rtsp_url).ok()
+}
+
+async fn clean_output_dir(dir: &Path) -> anyhow::Result<()> {
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            tokio::fs::create_dir_all(dir).await?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+    Ok(())
 }
