@@ -117,6 +117,12 @@
     margin-bottom: 12px;
 }
 
+.video-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .video {
     width: 100%;
     aspect-ratio: 16 / 9;

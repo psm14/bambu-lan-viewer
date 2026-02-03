@@ -340,13 +340,28 @@ impl CmafSegmenter {
             .map(|seg| seg.duration)
             .fold(0.0_f64, f64::max);
         let target_duration = self.target_duration.max(max_segment).ceil() as u64;
+        let mut max_part = self.part_duration;
+        for seg in &self.segments {
+            for part in &seg.parts {
+                if part.duration > max_part {
+                    max_part = part.duration;
+                }
+            }
+        }
+        if let Some(current) = current {
+            for part in &current.parts {
+                if part.duration > max_part {
+                    max_part = part.duration;
+                }
+            }
+        }
         let media_sequence = self
             .segments
             .front()
             .map(|seg| seg.seq)
             .or_else(|| current.map(|seg| seg.seq))
             .unwrap_or(0);
-        let part_hold_back = (self.part_duration * 3.0).max(self.part_duration + 0.1);
+        let part_hold_back = (max_part * 3.0).max(max_part + 0.1);
         let hold_back = (target_duration as f64 * 3.0).max(part_hold_back * 2.0);
 
         let mut lines = Vec::new();
@@ -356,10 +371,10 @@ impl CmafSegmenter {
         lines.push(format!("#EXT-X-TARGETDURATION:{}", target_duration));
         lines.push(format!(
             "#EXT-X-PART-INF:PART-TARGET={:.3}",
-            self.part_duration
+            max_part
         ));
         lines.push(format!(
-            "#EXT-X-SERVER-CONTROL:PART-HOLD-BACK={:.3},HOLD-BACK={:.3}",
+            "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK={:.3},HOLD-BACK={:.3}",
             part_hold_back, hold_back
         ));
         lines.push("#EXT-X-MAP:URI=\"init.mp4\"".to_string());

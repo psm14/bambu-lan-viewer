@@ -83,6 +83,7 @@ export default function App() {
     ? `${API_BASE}/hls/${selectedPrinterId}/stream_ll.m3u8`
     : "";
   const hlsUrl = useLowLatency ? llHlsUrl : baseHlsUrl;
+  const playlistLabel = useLowLatency ? "LL-HLS (CMAF)" : "HLS (TS)";
 
   const loadPrinters = async () => {
     setLoadingPrinters(true);
@@ -350,6 +351,14 @@ export default function App() {
     clearPendingLight();
     setVideoReload((value) => value + 1);
   }, [selectedPrinterId]);
+
+  const toggleLowLatency = () => {
+    if (!selectedPrinterId) {
+      return;
+    }
+    setUseLowLatency((value) => !value);
+    setVideoReload((value) => value + 1);
+  };
 
   const sendCommand = async (payload) => {
     if (!selectedPrinterId) {
@@ -660,13 +669,22 @@ export default function App() {
         <div className="card video-card">
           <div className="video-header">
             <h2>Camera</h2>
-            <button
-              type="button"
-              onClick={() => setVideoReload((value) => value + 1)}
-              disabled={!selectedPrinterId}
-            >
-              Reload Video
-            </button>
+            <div className="video-actions">
+              <button
+                type="button"
+                onClick={toggleLowLatency}
+                disabled={!selectedPrinterId}
+              >
+                {useLowLatency ? "LL-HLS On" : "LL-HLS Off"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setVideoReload((value) => value + 1)}
+                disabled={!selectedPrinterId}
+              >
+                Reload Video
+              </button>
+            </div>
           </div>
           <video
             key={videoReload}
@@ -678,7 +696,7 @@ export default function App() {
           />
           <p className="helper">
             {selectedPrinter
-              ? `Streaming ${selectedPrinter.name} via RTSPS → HLS.`
+              ? `Streaming ${selectedPrinter.name} via RTSPS → ${playlistLabel}.`
               : "Add a printer to start streaming."}
           </p>
           {videoError && <p className="error">{videoError}</p>}
