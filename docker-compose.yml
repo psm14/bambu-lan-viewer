@@ -11,8 +11,6 @@ services:
       - backend-data:/data
     tmpfs:
       - /hls
-    expose:
-      - "8080"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
       interval: 10s
@@ -28,8 +26,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "8080:80"
     restart: unless-stopped
 
   cloudflared:
