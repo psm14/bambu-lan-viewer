@@ -325,15 +325,15 @@ impl CmafSegmenter {
     }
 
     async fn write_playlist(&self, current: Option<&SegmentBuffer>) -> anyhow::Result<()> {
-        let ll = self.render_ll_playlist(current);
-        let tmp_ll = self.output_dir.join("stream_ll.m3u8.tmp");
-        let final_ll = self.output_dir.join("stream_ll.m3u8");
-        fs::write(&tmp_ll, ll).await?;
-        fs::rename(tmp_ll, final_ll).await?;
+        let playlist = self.render_playlist(current);
+        let tmp_path = self.output_dir.join("stream.m3u8.tmp");
+        let final_path = self.output_dir.join("stream.m3u8");
+        fs::write(&tmp_path, playlist).await?;
+        fs::rename(tmp_path, final_path).await?;
         Ok(())
     }
 
-    fn render_ll_playlist(&self, current: Option<&SegmentBuffer>) -> String {
+    fn render_playlist(&self, current: Option<&SegmentBuffer>) -> String {
         let max_segment = self
             .segments
             .iter()

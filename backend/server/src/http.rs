@@ -40,7 +40,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/printers/:id/status/stream", get(get_status_stream))
         .route("/api/printers/:id/command", post(post_command))
         .route("/hls/:id/stream.m3u8", get(get_playlist))
-        .route("/hls/:id/stream_ll.m3u8", get(get_ll_playlist))
         .route("/hls/:id/:segment", get(get_segment))
         .route("/healthz", get(healthz))
         .with_state(state)
@@ -248,26 +247,32 @@ async fn healthz() -> impl IntoResponse {
 async fn get_playlist(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(query): Query<LlReloadQuery>,
 ) -> impl IntoResponse {
     let runtime = match runtime_for(&state, id).await {
         Ok(runtime) => runtime,
         Err(response) => return response.into_response(),
     };
     let path = runtime.hls_dir.join("stream.m3u8");
-    match tokio::fs::read(path).await {
-        Ok(bytes) => (
-            StatusCode::OK,
-            [
-                (
-                    axum::http::header::CONTENT_TYPE,
-                    "application/vnd.apple.mpegurl",
-                ),
-                (axum::http::header::CACHE_CONTROL, "no-store"),
-            ],
-            bytes,
-        )
-            .into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    let should_block = query.msn.is_some();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        };
+
+        if should_block {
+            if let (Some(msn), Some(playlist)) = (query.msn, std::str::from_utf8(&bytes).ok()) {
+                if ll_request_ready(playlist, msn, query.part) || Instant::now() >= deadline {
+                    return playlist_response(bytes);
+                }
+                sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+        }
+
+        return playlist_response(bytes);
     }
 }
 
@@ -281,39 +286,7 @@ struct LlReloadQuery {
     _skip: Option<String>,
 }
 
-async fn get_ll_playlist(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-    Query(query): Query<LlReloadQuery>,
-) -> impl IntoResponse {
-    let runtime = match runtime_for(&state, id).await {
-        Ok(runtime) => runtime,
-        Err(response) => return response.into_response(),
-    };
-    let path = runtime.hls_dir.join("stream_ll.m3u8");
-    let should_block = query.msn.is_some();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let bytes = match tokio::fs::read(&path).await {
-            Ok(bytes) => bytes,
-            Err(_) => return StatusCode::NOT_FOUND.into_response(),
-        };
-
-        if should_block {
-            if let (Some(msn), Some(playlist)) = (query.msn, std::str::from_utf8(&bytes).ok()) {
-                if ll_request_ready(playlist, msn, query.part) || Instant::now() >= deadline {
-                    return ll_playlist_response(bytes);
-                }
-                sleep(Duration::from_millis(200)).await;
-                continue;
-            }
-        }
-
-        return ll_playlist_response(bytes);
-    }
-}
-
-fn ll_playlist_response(bytes: Vec<u8>) -> Response {
+fn playlist_response(bytes: Vec<u8>) -> Response {
     (
         StatusCode::OK,
         [
@@ -412,7 +385,7 @@ async fn get_segment(
             let content_type = if segment.ends_with(".m4s") || segment.ends_with(".mp4") {
                 "video/mp4"
             } else {
-                "video/mp2t"
+                "application/octet-stream"
             };
             if let Ok(value) = header::HeaderValue::from_str(content_type) {
                 headers.insert(header::CONTENT_TYPE, value);

@@ -7,9 +7,6 @@ const POLL_MS = 3000;
 
 const JOB_TIMEOUT_MS = 5000;
 const LIGHT_TIMEOUT_MS = 3000;
-const LOW_LATENCY_DEFAULT =
-  String(import.meta.env.VITE_HLS_LOW_LATENCY ?? "true").toLowerCase() ===
-  "true";
 
 const EMPTY_FORM = {
   id: null,
@@ -61,7 +58,6 @@ export default function App() {
   const [lightOverride, setLightOverride] = useState(null);
   const [pendingLightToken, setPendingLightToken] = useState(null);
   const [videoReload, setVideoReload] = useState(0);
-  const [useLowLatency, setUseLowLatency] = useState(LOW_LATENCY_DEFAULT);
   const [showManager, setShowManager] = useState(false);
   const [formState, setFormState] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
@@ -76,14 +72,10 @@ export default function App() {
 
   const selectedPrinter =
     printers.find((printer) => printer.id === selectedPrinterId) ?? null;
-  const baseHlsUrl = selectedPrinterId
+  const hlsUrl = selectedPrinterId
     ? `${API_BASE}/hls/${selectedPrinterId}/stream.m3u8`
     : "";
-  const llHlsUrl = selectedPrinterId
-    ? `${API_BASE}/hls/${selectedPrinterId}/stream_ll.m3u8`
-    : "";
-  const hlsUrl = useLowLatency ? llHlsUrl : baseHlsUrl;
-  const playlistLabel = useLowLatency ? "LL-HLS (CMAF)" : "HLS (TS)";
+  const playlistLabel = "LL-HLS (CMAF)";
 
   const loadPrinters = async () => {
     setLoadingPrinters(true);
@@ -223,11 +215,6 @@ export default function App() {
     }
 
     const onVideoError = () => {
-      if (useLowLatency) {
-        setUseLowLatency(false);
-        setVideoReload((value) => value + 1);
-        return;
-      }
       setVideoError("Video element error");
     };
     video.addEventListener("error", onVideoError);
@@ -239,10 +226,10 @@ export default function App() {
       const hls = new Hls({
         enableWorker: true,
         backBufferLength: 0,
-        lowLatencyMode: useLowLatency,
-        liveSyncDurationCount: useLowLatency ? 1 : 3,
-        liveMaxLatencyDurationCount: useLowLatency ? 3 : 6,
-        maxLiveSyncPlaybackRate: useLowLatency ? 1.5 : 1.0,
+        lowLatencyMode: true,
+        liveSyncDurationCount: 1,
+        liveMaxLatencyDurationCount: 3,
+        maxLiveSyncPlaybackRate: 1.5,
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
@@ -251,17 +238,6 @@ export default function App() {
         const message = `HLS error: ${data.type} ${data.details} fatal=${data.fatal}`;
         console.error(message, data);
         if (data.fatal) {
-          if (
-            useLowLatency &&
-            (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
-              data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR ||
-              data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR)
-          ) {
-            hls.destroy();
-            setUseLowLatency(false);
-            setVideoReload((value) => value + 1);
-            return;
-          }
           setVideoError(message);
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
@@ -351,14 +327,6 @@ export default function App() {
     clearPendingLight();
     setVideoReload((value) => value + 1);
   }, [selectedPrinterId]);
-
-  const toggleLowLatency = () => {
-    if (!selectedPrinterId) {
-      return;
-    }
-    setUseLowLatency((value) => !value);
-    setVideoReload((value) => value + 1);
-  };
 
   const sendCommand = async (payload) => {
     if (!selectedPrinterId) {
@@ -670,13 +638,6 @@ export default function App() {
           <div className="video-header">
             <h2>Camera</h2>
             <div className="video-actions">
-              <button
-                type="button"
-                onClick={toggleLowLatency}
-                disabled={!selectedPrinterId}
-              >
-                {useLowLatency ? "LL-HLS On" : "LL-HLS Off"}
-              </button>
               <button
                 type="button"
                 onClick={() => setVideoReload((value) => value + 1)}

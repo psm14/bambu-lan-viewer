@@ -7,11 +7,9 @@ a small self-hosted web app that:
 * connects to your bambu printers over lan/vpn
 * reads print status + controls over mqtt
 * ingests the camera stream via rtsp/rtsps
-* republishes video as **regular hls** (mpeg-ts) for browser playback
+* republishes video as **LL-HLS (CMAF)** for browser playback
 * runs behind cloudflare zero trust (auth handled externally)
 * deploys via docker-compose: backend, frontend (static), cloudflared
-
-ll-hls optional (see section 3b).
 
 ---
 
@@ -49,9 +47,9 @@ ll-hls optional (see section 3b).
   * receive rtp/h264 access units
 * hls packager:
 
-  * segment into **mpeg-ts** files (1–2s each)
+  * segment into **CMAF fMP4** (init + `.m4s` fragments)
   * maintain rolling window playlist `stream.m3u8`
-  * serve `stream.m3u8` + `segNNNN.ts`
+  * serve `stream.m3u8` + `init.mp4` + `segNNNN.m4s`
 * http api (axum):
 
   * `GET /api/printers` (list printers)
@@ -63,8 +61,8 @@ ll-hls optional (see section 3b).
   * `GET /api/printers/:id/status/stream` (server-sent events status stream)
   * `POST /api/printers/:id/command` (pause/resume/stop/light)
   * `GET /hls/:id/stream.m3u8`
-  * `GET /hls/:id/stream_ll.m3u8`
-  * `GET /hls/:id/segXXXX.ts`
+  * `GET /hls/:id/init.mp4`
+  * `GET /hls/:id/segXXXX.m4s`
   * `GET /healthz`
 
 ### frontend responsibilities (react)
@@ -88,16 +86,18 @@ ll-hls optional (see section 3b).
 * `DATABASE_URL` (or `DB_PATH`): sqlite path for printer configs (default `data/printers.db`)
   * container-friendly example: `sqlite:///data/printers.db`
 * `HLS_OUTPUT_DIR`: base directory; each printer writes to `HLS_OUTPUT_DIR/<printerId>/`
+* `HLS_PART_DURATION_SECS` (default `0.333`)
 
 ---
 
-## 3) hls strategy (phase 1: regular hls mpeg-ts)
+## 3) hls strategy (CMAF LL-HLS)
 
 ### segmenting rules
 
 * segment duration target: **2 seconds** (start here; 1s is fine later)
 * cut segments **only at IDR keyframes** so clients can join quickly
 * keep a rolling playlist window of ~6–10 segments (12–20 seconds)
+* emit CMAF parts (≈0.333s each) inside every segment for low latency
 
 ### file storage
 
@@ -112,46 +112,22 @@ start with **disk**. it’s robust and easy.
 ### playlist format
 
 * `#EXTM3U`
-* `#EXT-X-VERSION:3`
+* `#EXT-X-VERSION:9`
 * `#EXT-X-TARGETDURATION:2` (rounded up)
 * `#EXT-X-MEDIA-SEQUENCE:<first_seq_in_window>`
+* `#EXT-X-PART-INF:PART-TARGET=<max_part_duration>`
+* `#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,...`
+* `#EXT-X-MAP:URI="init.mp4"`
 * for each segment:
 
+  * `#EXT-X-PART:DURATION=...,URI="seg000123.m4s",BYTERANGE="..."` (one per part)
   * `#EXTINF:<duration>,`
-  * `seg000123.ts`
+  * `seg000123.m4s`
 
 ### client buffering expectations
 
 * safari is forgiving, but wants consistent playlist + segment availability
 * hls.js wants cors ok (same origin here so easy)
-
----
-
-## 3b) ll-hls (low latency, optional)
-
-backend can emit a low-latency playlist alongside the standard one:
-
-* standard: `GET /hls/:id/stream.m3u8`
-* low-latency: `GET /hls/:id/stream_ll.m3u8`
-
-ll-hls settings (env):
-
-* `HLS_LOW_LATENCY` (default true)
-* `HLS_PART_DURATION_SECS` (default `0.333`)
-
-ll-hls output files:
-
-* playlist: `/hls/:id/stream_ll.m3u8`
-* init: `/hls/:id/init.mp4`
-* segments: `/hls/:id/segXXXXXX.m4s`
-
-frontend (hls.js) prefers the ll-hls playlist for the selected printer and will fall back to the standard playlist if the ll playlist is missing.
-
-note: the ll-hls playlist is **cmaf/fmp4** (`init.mp4` + `.m4s` fragments). safari will use ll-hls when the low-latency toggle is on.
-
-frontend env:
-
-* `VITE_HLS_LOW_LATENCY` (default true)
 
 ---
 
@@ -163,45 +139,7 @@ frontend env:
 
 ---
 
-## 5) mpeg-ts muxing (what you need to implement)
-
-if you’re doing this bespoke, you need a minimal TS muxer for h264:
-
-### minimum TS features
-
-* PAT + PMT tables
-* one video PID
-* PES packetization of h264 access units
-* PTS (90kHz clock) monotonic
-* TS packetization into 188-byte packets
-
-### h264 formatting
-
-* ensure SPS/PPS appear regularly:
-
-  * at least at segment boundaries, ideally before each IDR in a new segment
-* you can:
-
-  * carry SPS/PPS from SDP (`sprop-parameter-sets`) and inject them at start of each segment
-  * or observe in-band NALs and cache latest SPS/PPS
-
-### timestamping
-
-* base PTS on RTP timestamps when available
-* if you lose RTP timestamp continuity, fall back to local clock and keep monotonic PTS (players hate backwards time)
-
-### segment cutting
-
-* maintain `current_segment_bytes`
-* when:
-
-  * elapsed >= target_duration AND
-  * the current access unit contains an IDR (NAL type 5)
-    → finalize segment and start a new one
-
----
-
-## 6) mqtt command shape (important)
+## 5) mqtt command shape (important)
 
 you already discovered commands require a top-level `user_id` wrapper (at least for ledctrl). treat this as a general rule for control commands.
 
@@ -214,7 +152,7 @@ backend should:
 
 ---
 
-## 7) api contract
+## 6) api contract
 
 ### printers
 
@@ -294,12 +232,12 @@ responses:
 ### video
 
 * `GET /hls/:id/stream.m3u8`
-* `GET /hls/:id/stream_ll.m3u8`
-* `GET /hls/:id/seg000123.ts`
+* `GET /hls/:id/init.mp4`
+* `GET /hls/:id/seg000123.m4s`
 
 ---
 
-## 8) docker-compose topology
+## 7) docker-compose topology
 
 * `backend`:
 

@@ -3,7 +3,6 @@ use crate::rtsp::auth::RtspCredentials;
 use crate::rtsp::client::RtspClient;
 use crate::rtsp::cmaf::CmafSegmenter;
 use crate::rtsp::depacketizer::H264RtpDepacketizer;
-use crate::rtsp::hls::HlsSegmenter;
 use crate::rtsp::rtp::RtpPacket;
 use crate::rtsp::time::RtpTimeMapper;
 use crate::state::PrinterState;
@@ -21,38 +20,19 @@ pub async fn run_rtsp_hls(
     state: Arc<RwLock<PrinterState>>,
     output_dir: PathBuf,
 ) {
-    let mut segmenter = match HlsSegmenter::new(
+    let mut cmaf_segmenter = match CmafSegmenter::new(
         output_dir.clone(),
         settings.hls_target_duration_secs,
         settings.hls_window_segments,
-        false,
         settings.hls_part_duration_secs,
     )
     .await
     {
         Ok(segmenter) => segmenter,
         Err(error) => {
-            warn!(?error, "failed to initialize hls segmenter");
+            warn!(?error, "failed to initialize cmaf segmenter");
             return;
         }
-    };
-    let mut cmaf_segmenter = if settings.hls_low_latency {
-        match CmafSegmenter::new(
-            output_dir.clone(),
-            settings.hls_target_duration_secs,
-            settings.hls_window_segments,
-            settings.hls_part_duration_secs,
-        )
-        .await
-        {
-            Ok(segmenter) => Some(segmenter),
-            Err(error) => {
-                warn!(?error, "failed to initialize cmaf segmenter");
-                None
-            }
-        }
-    } else {
-        None
     };
 
     let mut warned_missing = false;
@@ -74,7 +54,7 @@ pub async fn run_rtsp_hls(
         };
 
         if let Err(error) =
-            run_session(&settings, &printer, &mut segmenter, &mut cmaf_segmenter, url).await
+            run_session(&settings, &printer, &mut cmaf_segmenter, url).await
         {
             warn!(?error, "rtsp session ended");
         }
@@ -85,8 +65,7 @@ pub async fn run_rtsp_hls(
 async fn run_session(
     settings: &AppConfig,
     printer: &PrinterConfig,
-    segmenter: &mut HlsSegmenter,
-    cmaf_segmenter: &mut Option<CmafSegmenter>,
+    cmaf_segmenter: &mut CmafSegmenter,
     url: Url,
 ) -> anyhow::Result<()> {
     let credentials = Some(RtspCredentials {
@@ -98,10 +77,7 @@ async fn run_session(
     let mut session = client.start().await?;
 
     if let (Some(sps), Some(pps)) = (session.sdp.sps.clone(), session.sdp.pps.clone()) {
-        segmenter.set_parameter_sets(sps.clone(), pps.clone());
-        if let Some(cmaf) = cmaf_segmenter.as_mut() {
-            cmaf.set_parameter_sets(sps, pps);
-        }
+        cmaf_segmenter.set_parameter_sets(sps, pps);
     }
 
     let expected_payload = session.sdp.payload_type;
@@ -155,25 +131,16 @@ async fn run_session(
             );
         }
         if let Some((sps, pps)) = depacketizer.take_parameter_sets() {
-            segmenter.set_parameter_sets(sps.clone(), pps.clone());
-            if let Some(cmaf) = cmaf_segmenter.as_mut() {
-                cmaf.set_parameter_sets(sps, pps);
-            }
+            cmaf_segmenter.set_parameter_sets(sps, pps);
         }
 
         for access_unit in access_units {
             let pts = time_mapper.pts90k(access_unit.rtp_timestamp);
-            segmenter.push_access_unit(access_unit.clone(), pts).await?;
-            if let Some(cmaf) = cmaf_segmenter.as_mut() {
-                cmaf.push_access_unit(access_unit, pts).await?;
-            }
+            cmaf_segmenter.push_access_unit(access_unit, pts).await?;
         }
     }
 
-    segmenter.finalize_segment().await?;
-    if let Some(cmaf) = cmaf_segmenter.as_mut() {
-        cmaf.finalize_segment().await?;
-    }
+    cmaf_segmenter.finalize_segment().await?;
     Ok(())
 }
 

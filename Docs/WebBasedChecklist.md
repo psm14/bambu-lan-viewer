@@ -62,29 +62,27 @@
 
   * fps, last pts, last idr time, etc.
 
-## phase 3: hls packager (mpeg-ts) + serving
+## phase 3: hls packager (CMAF LL-HLS) + serving
 
-* [x] implement minimal mpeg-ts muxer:
+* [x] implement minimal CMAF writer:
 
-  * [x] PAT/PMT generation
-  * [x] PES packetization for H264
-  * [x] PTS stamping
-  * [x] TS packetization (188-byte packets)
+  * [x] `init.mp4` (ftyp + moov with avcC)
+  * [x] fragment parts (`styp` + `moof` + `mdat`)
 * [x] implement segmenter:
 
   * [x] maintain current segment buffer + start pts
   * [x] flush segment on (elapsed>=2s && is_idr)
-  * [x] write `seg%06d.ts`
-  * [x] update `stream.m3u8` atomically (write temp then rename)
+  * [x] write `seg%06d.m4s` and update `stream.m3u8` atomically (write temp then rename)
   * [x] delete segments older than window
 * [x] serve hls:
 
   * [x] `GET /hls/:id/stream.m3u8` from disk
-  * [x] `GET /hls/:id/:segment.ts` from disk
+  * [x] `GET /hls/:id/init.mp4` from disk
+  * [x] `GET /hls/:id/:segment.m4s` from disk
   * [x] set content-types:
 
     * m3u8: `application/vnd.apple.mpegurl`
-    * ts: `video/mp2t`
+    * mp4/m4s: `video/mp4`
   * [x] disable caching headers (or very short) to avoid stale playlist issues through proxies
 
 ## phase 4: frontend video player
@@ -97,7 +95,7 @@
 
   * attach media
   * loadSource `/hls/:id/stream.m3u8`
-* [x] add UI toggle “compatibility mode” / “reload video”
+* [x] add UI “reload video” button
 * [x] show stale indicator if `/api/printers/:id/status.lastUpdate` old
 
 ## phase 5: docker-compose + cloudflared
@@ -136,4 +134,4 @@
 
 ## stretch goal: ll-hls (now available)
 
-* [x] emit ll-hls playlist (`/hls/:id/stream_ll.m3u8`) with cmaf/fmp4 (`init.mp4` + `.m4s`)
+* [x] emit CMAF LL-HLS playlist (`/hls/:id/stream.m3u8`) with `init.mp4` + `.m4s`
