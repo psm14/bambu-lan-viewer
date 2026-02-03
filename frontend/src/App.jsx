@@ -233,6 +233,47 @@ export default function App() {
         target.addEventListener(name, resolve, { once: true });
       });
 
+    const waitForPlayback = (videoEl, timeoutMs) =>
+      new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          videoEl.removeEventListener("playing", onPlaying);
+          videoEl.removeEventListener("timeupdate", onTimeUpdate);
+          videoEl.removeEventListener("error", onError);
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+        };
+
+        const onPlaying = () => {
+          cleanup();
+          resolve();
+        };
+        const onTimeUpdate = () => {
+          if (videoEl.currentTime > 0.01 || videoEl.readyState >= 2) {
+            cleanup();
+            resolve();
+          }
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("video error"));
+        };
+
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error("MSE playback timeout"));
+        }, timeoutMs);
+
+        videoEl.addEventListener("playing", onPlaying);
+        videoEl.addEventListener("timeupdate", onTimeUpdate);
+        videoEl.addEventListener("error", onError);
+      });
+
     const parseCodec = (value) => {
       if (!value) {
         return "";
@@ -255,6 +296,29 @@ export default function App() {
       let sourceBuffer = null;
       let closed = false;
 
+      const attachMediaSource = (mime) => {
+        if (isSafari) {
+          while (video.firstChild) {
+            video.removeChild(video.firstChild);
+          }
+          const mseSource = document.createElement("source");
+          mseSource.src = objectUrl;
+          mseSource.type = mime;
+          video.appendChild(mseSource);
+
+          if (hlsUrl) {
+            const hlsSource = document.createElement("source");
+            hlsSource.src = hlsUrl;
+            hlsSource.type = "application/vnd.apple.mpegurl";
+            video.appendChild(hlsSource);
+          }
+          video.load();
+          return;
+        }
+
+        video.src = objectUrl;
+      };
+
       const teardown = () => {
         closed = true;
         abortController.abort();
@@ -269,14 +333,15 @@ export default function App() {
           }
         }
         URL.revokeObjectURL(objectUrl);
+        while (video.firstChild) {
+          video.removeChild(video.firstChild);
+        }
         video.removeAttribute("src");
         video.load();
       };
       registerCleanup(teardown);
 
       try {
-        video.src = objectUrl;
-
         const response = await fetch(cmafUrl, {
           cache: "no-store",
           signal: abortController.signal,
@@ -290,13 +355,19 @@ export default function App() {
           response.headers.get("content-type") ??
           "";
         const codec = parseCodec(codecHeader) || "avc1.42E01E";
+        const mime = `video/mp4; codecs="${codec}"`;
+        if (typeof MSEClass.isTypeSupported === "function") {
+          if (!MSEClass.isTypeSupported(mime)) {
+            throw new Error(`MSE unsupported codec: ${codec}`);
+          }
+        }
+
+        attachMediaSource(mime);
 
         if (mediaSource.readyState !== "open") {
           await waitForEvent(mediaSource, "sourceopen");
         }
-        sourceBuffer = mediaSource.addSourceBuffer(
-          `video/mp4; codecs="${codec}"`,
-        );
+        sourceBuffer = mediaSource.addSourceBuffer(mime);
         try {
           sourceBuffer.mode = "sequence";
         } catch (err) {
@@ -335,6 +406,7 @@ export default function App() {
 
         let buffer = new Uint8Array();
         let started = false;
+        let playbackConfirmed = false;
 
         const readU32BE = (buf) =>
           new DataView(buf.buffer, buf.byteOffset, 4).getUint32(0);
@@ -371,6 +443,10 @@ export default function App() {
                 }
               }
               video.play().catch(() => {});
+            }
+            if (started && !playbackConfirmed && isSafari) {
+              playbackConfirmed = true;
+              await waitForPlayback(video, 6000);
             }
           }
         }
