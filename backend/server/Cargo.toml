@@ -1,0 +1,28 @@
+[package]
+name = "bambu-lan-viewer-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+axum = { version = "0.6", features = ["ws"] }
+base64 = "0.21"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+jsonwebtoken = "9"
+md5 = "0.7"
+rand = "0.8"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+rumqttc = "0.23"
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = "0.24"
+tower-http = { version = "0.4", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"

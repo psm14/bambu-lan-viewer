@@ -1,0 +1,88 @@
+@import url("https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap");
+
+:root {
+    color-scheme: light dark;
+    font-family: "Space Grotesk", "Avenir Next", "Futura", sans-serif;
+    line-height: 1.4;
+    font-weight: 400;
+    --bg: #f4efe2;
+    --bg-accent: #d8e7de;
+    --ink: #1d1f1a;
+    --muted: #5f6257;
+    --card: #fffaf0;
+    --accent: #d45a2a;
+    --accent-2: #1f6f5b;
+    --border: rgba(29, 31, 26, 0.15);
+    --shadow: 0 18px 40px rgba(29, 31, 26, 0.12);
+    --shadow-hover: 0 6px 18px rgba(29, 31, 26, 0.12);
+    --surface: rgba(255, 255, 255, 0.65);
+    --surface-strong: rgba(255, 255, 255, 0.9);
+    --video-bg: #141511;
+    --danger: #b33d1a;
+    --danger-border: rgba(212, 90, 42, 0.5);
+    --bg-gradient:
+        radial-gradient(
+            circle at top right,
+            rgba(216, 231, 222, 0.9),
+            transparent 60%
+        ),
+        radial-gradient(
+            circle at 20% 20%,
+            rgba(255, 230, 200, 0.6),
+            transparent 55%
+        ),
+        linear-gradient(180deg, var(--bg), #efe7d8 60%, #e9e1cf 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #12110f;
+        --bg-accent: #1b221d;
+        --ink: #f0eadf;
+        --muted: #b5ada1;
+        --card: #1c1b17;
+        --accent: #f08a5b;
+        --accent-2: #4ec7a4;
+        --border: rgba(240, 234, 223, 0.14);
+        --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+        --shadow-hover: 0 10px 24px rgba(0, 0, 0, 0.45);
+        --surface: rgba(34, 33, 29, 0.78);
+        --surface-strong: rgba(34, 33, 29, 0.95);
+        --video-bg: #0b0c0a;
+        --danger: #ff8b6a;
+        --danger-border: rgba(240, 138, 91, 0.6);
+        --bg-gradient:
+            radial-gradient(
+                circle at top right,
+                rgba(58, 94, 82, 0.35),
+                transparent 60%
+            ),
+            radial-gradient(
+                circle at 20% 20%,
+                rgba(140, 82, 52, 0.25),
+                transparent 55%
+            ),
+            linear-gradient(180deg, var(--bg), #0e0d0b 60%, #0b0a08 100%);
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    min-height: 100%;
+}
+
+body {
+    margin: 0;
+    min-height: 100svh;
+    color: var(--ink);
+    background: var(--bg-gradient);
+}
+
+button {
+    font-family: inherit;
+}

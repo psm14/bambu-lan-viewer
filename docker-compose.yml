@@ -1,0 +1,44 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./.cloudflared.env
+    environment:
+      DATABASE_URL: sqlite:///data/printers.db
+      CMAF_WS_BACKLOG_SECS: "3.0"
+      CMAF_WRITE_FILES: "false"
+      HTTP_BIND: 0.0.0.0:8080
+      CF_ACCESS_ENABLED: "true"
+      TUNNEL_TOKEN: "none" # Shadows value from env_file since it is sensitive and not needed here
+    volumes:
+      - backend-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    env_file:
+      - ./.cloudflared.env
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  backend-data:
