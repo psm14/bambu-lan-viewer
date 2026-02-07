@@ -43,12 +43,6 @@ ingress:
     path: /api/*
     service: http://backend:8080
   - hostname: app.example.com
-    path: /healthz
-    service: http://backend:8080
-  - hostname: app.example.com
-    path: /readyz
-    service: http://backend:8080
-  - hostname: app.example.com
     service: http://frontend:80
   - service: http_status:404
 ```
