@@ -8,6 +8,9 @@ use rustls::{
 use std::sync::Arc;
 
 pub fn insecure_client_config() -> ClientConfig {
+    // Bambu printers present arbitrary self-signed certificates on LAN endpoints.
+    // This verifier is only for direct printer transports (MQTT/RTSP), not for
+    // internet-facing requests like Cloudflare JWKS fetches.
     let verifier = Arc::new(InsecureVerifier);
     ClientConfig::builder()
         .with_safe_defaults()
