@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: sqlite:///data/printers.db
+      CMAF_WS_BACKLOG_SECS: "3.0"
+      CMAF_WRITE_FILES: "false"
+      HTTP_BIND: 0.0.0.0:8080
+      CF_ACCESS_ENABLED: "false"
+    volumes:
+      - backend-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    ports:
+      - "127.0.0.1:18080:8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:18081:80"
+    restart: unless-stopped
+
+volumes:
+  backend-data:
