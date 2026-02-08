@@ -1,0 +1,48 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: sqlite:///data/printers.db
+      CMAF_WS_BACKLOG_SECS: "3.0"
+      CMAF_WRITE_FILES: "false"
+      HTTP_BIND: 0.0.0.0:8080
+      CF_ACCESS_ENABLED: "false"
+    volumes:
+      - backend-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    env_file:
+      - ./.tailscale.env
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./.tailscale:/config:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  tailscale-state:

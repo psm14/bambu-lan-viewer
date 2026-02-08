@@ -6,3 +6,4 @@ frontend/.env
 frontend/node_modules/
 frontend/dist/
 .cloudflared.env
+.tailscale.env

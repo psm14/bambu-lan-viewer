@@ -1,0 +1,31 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "${TS_CERT_DOMAIN}:443": {
+      "Handlers": {
+        "/api": {
+          "Proxy": "http://backend:8080"
+        },
+        "/api/": {
+          "Proxy": "http://backend:8080"
+        },
+        "/healthz": {
+          "Proxy": "http://backend:8080"
+        },
+        "/readyz": {
+          "Proxy": "http://backend:8080"
+        },
+        "/": {
+          "Proxy": "http://frontend:80"
+        }
+      }
+    }
+  },
+  "AllowFunnel": {
+    "${TS_CERT_DOMAIN}:443": false
+  }
+}

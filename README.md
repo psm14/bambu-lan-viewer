@@ -21,33 +21,13 @@ VITE_API_BASE=http://localhost:8080 npm run dev
 If you prefer, set `VITE_API_BASE` in `frontend/.env.local` instead of in the command line.
 
 **Production (Docker Compose)**
-This compose setup is designed to run behind a Cloudflare Tunnel and Cloudflare Access.
+Two production deployment methods are included:
+1. Cloudflare Tunnel + Cloudflare Access (`docker-compose.yml`)
+2. Tailscale Serve (`docker-compose.tailscale.yml`)
 
-1. Configure `.cloudflared.env` with your Cloudflare values.
-2. Build and start the stack.
-```bash
-docker compose up -d --build
-```
-3. Access the UI via the hostname(s) configured in your Cloudflare Tunnel.
-
-Notes:
-`docker-compose.yml` does not publish ports to the host. If you want direct local access without Cloudflare, add port mappings and set `CF_ACCESS_ENABLED=false` in `docker-compose.yml`.
-
-**Cloudflare Tunnel Routing**
-Configure your tunnel to send API traffic (including WebSockets) to the backend container, and everything else to the frontend.
-
-Example `cloudflared` config (ingress order matters; catchall last):
-```yaml
-ingress:
-  - hostname: app.example.com
-    path: /api/*
-    service: http://backend:8080
-  - hostname: app.example.com
-    service: http://frontend:80
-  - service: http_status:404
-```
-
-If you configure this in the Cloudflare dashboard instead of a config file, create path-based routes with the same mapping and ensure the catchall (`/*`) points to `http://frontend:80`.
+Both compose stacks keep host ports closed by default. For full setup instructions:
+- [Cloudflare Deployment Guide](Docs/DeploymentCloudflare.md)
+- [Tailscale Deployment Guide](Docs/DeploymentTailscale.md)
 
 **Configuration**
 Backend (selected):
@@ -59,7 +39,7 @@ Backend (selected):
 - `CMAF_PART_DURATION_SECS`: CMAF fragment duration. Default `0.333`.
 - `CMAF_WS_BACKLOG_SECS`: CMAF backlog seconds sent on WS connect. Default `3.0`.
 - `CMAF_WRITE_FILES`: Write CMAF files/playlist to disk for debugging. Default `false`.
-- `CF_ACCESS_ENABLED`: Enable Cloudflare Access enforcement. Default `false` (set to `true` in `docker-compose.yml`).
+- `CF_ACCESS_ENABLED`: Enable Cloudflare Access enforcement. Default `false` (set to `true` in `docker-compose.yml`, `false` in `docker-compose.tailscale.yml`).
 - `CF_ACCESS_TEAM_DOMAIN`: Cloudflare Access team domain (used to derive JWKS/issuer).
 - `CF_ACCESS_JWKS_URL`: Override JWKS URL (optional).
 - `CF_ACCESS_AUD`: Access application audience (optional but recommended).
