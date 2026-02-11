@@ -386,8 +386,26 @@ async fn handle_cmaf_ws(mut socket: WebSocket, runtime: Arc<PrinterRuntime>) {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                break;
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::warn!(
+                    skipped,
+                    "cmaf websocket lagged; replaying from in-memory backlog"
+                );
+                let backlog = runtime.cmaf_stream.backlog_snapshot();
+                for fragment in backlog {
+                    if fragment.seq <= last_seq {
+                        continue;
+                    }
+                    last_seq = fragment.seq;
+                    if socket
+                        .send(Message::Binary(fragment.bytes.to_vec()))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                continue;
             }
             Err(broadcast::error::RecvError::Closed) => break,
         }

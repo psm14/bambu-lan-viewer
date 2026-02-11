@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub mqtt_keep_alive_secs: u64,
     pub mqtt_user_id: String,
     pub rtsp_tls_insecure: bool,
+    pub rtsp_packet_timeout_secs: u64,
     pub cmaf_output_dir: String,
     pub cmaf_target_duration_secs: f64,
     pub cmaf_window_segments: usize,
@@ -60,6 +61,7 @@ impl AppConfig {
         let mqtt_keep_alive_secs = env_u64("MQTT_KEEP_ALIVE_SECS").unwrap_or(30);
         let mqtt_user_id = env::var("MQTT_USER_ID").unwrap_or_else(|_| "1".to_string());
         let rtsp_tls_insecure = env_bool("RTSP_TLS_INSECURE", true);
+        let rtsp_packet_timeout_secs = env_u64("RTSP_PACKET_TIMEOUT_SECS").unwrap_or(10);
         let cmaf_output_dir = env::var("CMAF_OUTPUT_DIR").unwrap_or_else(|_| "cmaf".to_string());
         let cmaf_target_duration_secs = env_f64("CMAF_TARGET_DURATION_SECS").unwrap_or(2.0);
         let cmaf_window_segments = env_usize("CMAF_WINDOW_SEGMENTS").unwrap_or(6);
@@ -98,6 +100,7 @@ impl AppConfig {
             mqtt_keep_alive_secs,
             mqtt_user_id,
             rtsp_tls_insecure,
+            rtsp_packet_timeout_secs,
             cmaf_output_dir,
             cmaf_target_duration_secs,
             cmaf_window_segments,

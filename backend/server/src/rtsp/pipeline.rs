@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 use url::Url;
 
@@ -92,12 +92,23 @@ async fn run_session(
     let expected_payload = session.sdp.payload_type;
     let mut depacketizer = H264RtpDepacketizer::new();
     let mut time_mapper = RtpTimeMapper::new();
+    let interleaved_timeout = Duration::from_secs(settings.rtsp_packet_timeout_secs.max(1));
 
     let mut saw_interleaved = false;
     let mut saw_rtp = false;
     let mut saw_access_unit = false;
 
-    while let Some(packet) = session.interleaved_rx.recv().await {
+    loop {
+        let packet = match timeout(interleaved_timeout, session.interleaved_rx.recv()).await {
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
+            Err(_) => {
+                anyhow::bail!(
+                    "rtsp interleaved timeout ({}s without packets)",
+                    interleaved_timeout.as_secs()
+                );
+            }
+        };
         if !saw_interleaved {
             saw_interleaved = true;
             debug!(
