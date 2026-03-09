@@ -10,6 +10,7 @@ axum = { version = "0.6", features = ["ws"] }
 base64 = "0.21"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
 dotenvy = "0.15"
 jsonwebtoken = "9"
 md5 = "0.7"

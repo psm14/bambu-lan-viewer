@@ -10,7 +10,7 @@ This guide deploys Bambu LAN Viewer in production using:
 1. `tailscale` container joins your tailnet.
 2. `tailscale serve` publishes HTTPS on the Tailscale cert domain.
 3. Requests are routed by path:
-   - `/api` and `/api/*` -> `http://backend:8080`
+   - `/api` and `/api/*` -> `http://backend:8080/api`
    - all other paths -> `http://frontend:80`
 4. Backend runs with `CF_ACCESS_ENABLED=false` (security comes from Tailscale ACLs and tailnet identity).
 
@@ -20,6 +20,8 @@ This guide deploys Bambu LAN Viewer in production using:
 2. MagicDNS and HTTPS certificates enabled in tailnet settings.
 3. A Tailscale auth key for this deployment.
 4. Docker and Docker Compose on the deployment host.
+
+Tailscale provisions and rotates the TLS certificate for the `*.ts.net` hostname automatically. You do not need to provision an application certificate manually for this deployment mode.
 
 ## Repository Files
 
@@ -49,7 +51,7 @@ TS_EXTRA_ARGS=
 Default config in `/Users/user/dev/Bambu LAN Viewer/.tailscale/serve.json`:
 
 1. HTTPS on `:443`.
-2. `/api` + `/api/` proxied to backend.
+2. `/api` + `/api/` proxied to backend with the `/api` prefix preserved.
 3. `/` proxied to frontend.
 4. Funnel disabled by default.
 
@@ -72,7 +74,11 @@ docker compose -f docker-compose.tailscale.yml exec tailscale tailscale status
 docker compose -f docker-compose.tailscale.yml exec tailscale tailscale serve status
 ```
 
-Use the HTTPS URL reported by `tailscale serve status` to access the UI.
+Use the HTTPS URL reported by `tailscale serve status` to access the UI. For example:
+
+```text
+https://bambu-lan-viewer.<tailnet>.ts.net
+```
 
 ## 5) Updating / Restarting
 
@@ -95,7 +101,7 @@ docker compose -f docker-compose.tailscale.yml up -d --build
 3. Verify ACLs allow your user/device to reach this node.
 
 ### UI loads but API fails
-1. Verify `/api` and `/api/` handlers still point to `http://backend:8080`.
+1. Verify `/api` and `/api/` handlers still point to `http://backend:8080/api` and `http://backend:8080/api/`.
 2. Confirm backend service is healthy in compose logs.
 
 ### HTTPS URL missing
