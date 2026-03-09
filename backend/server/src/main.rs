@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let app = http::router(app_state);
 
     axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     Ok(())

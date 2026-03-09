@@ -6,6 +6,7 @@ use crate::printers::PrinterRuntime;
 use crate::state::PrinterState;
 use async_stream::stream;
 use axum::extract::{
+    connect_info::ConnectInfo,
     ws::{Message, WebSocket, WebSocketUpgrade},
     Path, State,
 };
@@ -19,6 +20,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -31,6 +33,11 @@ pub struct AppState {
     pub db: SqlitePool,
     pub printers: Arc<RwLock<HashMap<i64, Arc<PrinterRuntime>>>>,
     pub auth: AuthManager,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RequestConnectionInfo {
+    pub peer_addr: Option<SocketAddr>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -73,6 +80,11 @@ async fn auth_middleware<B>(
     mut req: axum::http::Request<B>,
     next: middleware::Next<B>,
 ) -> Response {
+    let connection_info = RequestConnectionInfo {
+        peer_addr: current_peer_addr(&req),
+    };
+    req.extensions_mut().insert(connection_info);
+
     match state.auth.authenticate(req.headers()).await {
         Ok(context) => {
             req.extensions_mut().insert(context);
@@ -80,6 +92,12 @@ async fn auth_middleware<B>(
         }
         Err(error) => error.into_response(),
     }
+}
+
+fn current_peer_addr<B>(req: &axum::http::Request<B>) -> Option<SocketAddr> {
+    req.extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0)
 }
 
 async fn get_session(Extension(auth): Extension<AuthContext>) -> impl IntoResponse {
@@ -456,4 +474,21 @@ fn db_error_response(error: anyhow::Error) -> Response {
         StatusCode::INTERNAL_SERVER_ERROR
     };
     (status, Json(ErrorResponse::new(&message))).into_response()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::current_peer_addr;
+    use axum::extract::connect_info::ConnectInfo;
+    use axum::http::Request;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn current_peer_addr_reads_connect_info_extension() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4242);
+        let mut req = Request::builder().uri("/api/session").body(()).unwrap();
+        req.extensions_mut().insert(ConnectInfo(addr));
+        assert_eq!(current_peer_addr(&req), Some(addr));
+    }
 }

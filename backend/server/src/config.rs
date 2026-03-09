@@ -29,6 +29,11 @@ pub struct AppConfig {
     pub cf_access_issuer: Option<String>,
     pub cf_access_jwks_cache_ttl_secs: u64,
     pub cf_access_dev_user_email: String,
+    pub cf_access_allow_local_bypass: bool,
+    pub trust_proxy_headers: bool,
+    pub trusted_proxy_cidrs: Vec<String>,
+    pub local_bypass_cidrs: Vec<String>,
+    pub cf_access_local_bypass_dev_user_email: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -87,6 +92,13 @@ impl AppConfig {
             env_u64("CF_ACCESS_JWKS_CACHE_TTL_SECS").unwrap_or(60 * 60);
         let cf_access_dev_user_email =
             env::var("CF_ACCESS_DEV_USER_EMAIL").unwrap_or_else(|_| "admin@local".to_string());
+        let cf_access_allow_local_bypass = env_bool("CF_ACCESS_ALLOW_LOCAL_BYPASS", false);
+        let trust_proxy_headers = env_bool("TRUST_PROXY_HEADERS", false);
+        let trusted_proxy_cidrs = env_csv("TRUSTED_PROXY_CIDRS");
+        let local_bypass_cidrs =
+            env_csv_with_default("LOCAL_BYPASS_CIDRS", &["127.0.0.1/32", "::1/128"]);
+        let cf_access_local_bypass_dev_user_email = env::var("CF_ACCESS_LOCAL_BYPASS_DEV_USER_EMAIL")
+            .unwrap_or_else(|_| cf_access_dev_user_email.clone());
 
         Ok(Self {
             database_url,
@@ -115,6 +127,11 @@ impl AppConfig {
             cf_access_issuer,
             cf_access_jwks_cache_ttl_secs,
             cf_access_dev_user_email,
+            cf_access_allow_local_bypass,
+            trust_proxy_headers,
+            trusted_proxy_cidrs,
+            local_bypass_cidrs,
+            cf_access_local_bypass_dev_user_email,
         })
     }
 }
@@ -148,4 +165,52 @@ fn env_usize(name: &str) -> Option<usize> {
 
 fn env_f64(name: &str) -> Option<f64> {
     env::var(name).ok().and_then(|value| value.parse().ok())
+}
+
+
+fn env_csv(name: &str) -> Vec<String> {
+    env::var(name)
+        .ok()
+        .map(|value| parse_csv_list(&value))
+        .unwrap_or_default()
+}
+
+fn env_csv_with_default(name: &str, default: &[&str]) -> Vec<String> {
+    let values = env_csv(name);
+    if values.is_empty() {
+        default.iter().map(|value| value.to_string()).collect()
+    } else {
+        values
+    }
+}
+
+fn parse_csv_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{env_csv_with_default, parse_csv_list};
+
+    #[test]
+    fn parse_csv_list_trims_and_drops_empty_values() {
+        assert_eq!(
+            parse_csv_list(" 127.0.0.1/32, ,::1/128 ,,10.0.0.0/8 "),
+            vec!["127.0.0.1/32", "::1/128", "10.0.0.0/8"]
+        );
+    }
+
+    #[test]
+    fn env_csv_with_default_returns_defaults_for_empty_value() {
+        std::env::remove_var("LOCAL_BYPASS_CIDRS_TEST");
+        assert_eq!(
+            env_csv_with_default("LOCAL_BYPASS_CIDRS_TEST", &["127.0.0.1/32", "::1/128"]),
+            vec!["127.0.0.1/32", "::1/128"]
+        );
+    }
 }
