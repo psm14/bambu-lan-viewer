@@ -30,6 +30,10 @@ Cloudflare and Tailscale stacks keep host ports closed by default. The generic s
 - [Cloudflare Deployment Guide](Docs/DeploymentCloudflare.md)
 - [Tailscale Deployment Guide](Docs/DeploymentTailscale.md)
 - [Generic Deployment Guide](Docs/DeploymentGeneric.md)
+- [CLI Guide](Docs/CLI.md)
+
+**Recommended private deployment**
+If you are only accessing the viewer from your own devices, prefer the Tailscale deployment. Tailscale Serve terminates HTTPS for the `*.ts.net` hostname and keeps the backend/frontend private inside the compose network.
 
 **Configuration**
 Backend (selected):
@@ -50,5 +54,10 @@ Backend (selected):
 
 Frontend:
 - `VITE_API_BASE`: Base URL for API calls. Leave empty when frontend and backend share the same origin.
+
+CLI:
+- `BAMBUCTL_BASE_URL`: Base URL for `bambuctl`. Default `http://127.0.0.1:8080`.
+- `BAMBUCTL_USERNAME`: Optional HTTP Basic Auth username.
+- `BAMBUCTL_PASSWORD`: Optional HTTP Basic Auth password.
 
 For the full backend configuration list, see `backend/server/src/config.rs`.
