@@ -8,10 +8,10 @@
     "${TS_CERT_DOMAIN}:443": {
       "Handlers": {
         "/api": {
-          "Proxy": "http://backend:8080"
+          "Proxy": "http://backend:8080/api"
         },
         "/api/": {
-          "Proxy": "http://backend:8080"
+          "Proxy": "http://backend:8080/api/"
         },
         "/healthz": {
           "Proxy": "http://backend:8080"
