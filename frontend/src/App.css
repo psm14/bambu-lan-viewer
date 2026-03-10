@@ -294,9 +294,9 @@
 }
 
 .icon-button svg {
-    width: 18px;
-    height: 18px;
-    fill: currentColor;
+    width: 20px;
+    height: 20px;
+    overflow: visible;
 }
 
 .icon-button.danger {
@@ -313,6 +313,8 @@
 
 .icon-button.light.on {
     color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 10%, var(--surface-strong));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 18%, transparent), 0 0 14px color-mix(in srgb, var(--accent-2) 18%, transparent);
 }
 
 .icon-button.light.off {
@@ -431,12 +433,13 @@
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    color: var(--muted);
+    color: color-mix(in srgb, var(--ink) 54%, var(--muted));
 }
 
 .temp-icon {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
+    overflow: visible;
 }
 
 .temp-value {

@@ -1,4 +1,5 @@
 import { formatPercent } from "../utils/format";
+import { LightBulbIcon } from "./Icons";
 
 export default function StatusControls({
   jobStateDisplay,
@@ -51,25 +52,7 @@ export default function StatusControls({
           onClick={handleLightToggle}
           title={lightIsOn ? "Light On" : "Light Off"}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M8 21h8m-7-3h6m1-10a5 5 0 1 0-8 3.9V14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.1A5 5 0 0 0 16 8Z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            {lightIsOn && (
-              <path
-                d="M12 3v1M5.5 6.5l.7.7M18.5 6.5l-.7.7M4 12h1M19 12h1"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            )}
-          </svg>
+          <LightBulbIcon on={lightIsOn} />
         </button>
       </div>
       <div className="progress-row">

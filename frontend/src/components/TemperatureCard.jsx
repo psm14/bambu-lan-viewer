@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatTemp } from "../utils/format";
+import { BedTempIcon, NozzleTempIcon } from "./Icons";
 
 const NOZZLE_MIN_C = 0;
 const NOZZLE_MAX_C = 320;
@@ -109,22 +110,7 @@ export default function TemperatureCard({
     <div className="card temperature-card">
       <div className="temp-row">
         <div className="temp-item" role="group" aria-label="Nozzle temperature">
-          <svg className="temp-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M9 3h6v6h-2v3.5l3.5 4.5H7.5L11 12.5V9H9V3Z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M8 17h8M7 20h10"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
+          <NozzleTempIcon className="temp-icon" />
           <span className="temp-value mono">
             {formatTemp(status?.nozzleC)}
           </span>
@@ -187,25 +173,7 @@ export default function TemperatureCard({
           )}
         </div>
         <div className="temp-item" role="group" aria-label="Bed temperature">
-          <svg className="temp-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect
-              x="4"
-              y="6"
-              width="16"
-              height="6"
-              rx="2"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-            />
-            <path
-              d="M6 16h12M8 20h8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
+          <BedTempIcon className="temp-icon" />
           <span className="temp-value mono">{formatTemp(status?.bedC)}</span>
           {bedEditing ? (
             <form
