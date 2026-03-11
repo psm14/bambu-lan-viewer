@@ -88,8 +88,8 @@ export default function StatusControls({
               </svg>
             ) : (
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="6" y="5" width="4" height="14" rx="1" />
-                <rect x="14" y="5" width="4" height="14" rx="1" />
+                <rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" />
+                <rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" />
               </svg>
             )}
           </button>
@@ -102,7 +102,7 @@ export default function StatusControls({
             title={stopLabel}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="2" />
+              <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
             </svg>
           </button>
         </div>
