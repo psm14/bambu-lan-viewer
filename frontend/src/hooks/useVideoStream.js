@@ -153,7 +153,6 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
       let wsClosed = false;
       let liveEdgeTimer = null;
       let liveEdgeStarted = false;
-      let appendedChunks = 0;
 
       const attachMediaSource = () => {
         if (isSafari) {
@@ -269,9 +268,10 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
             return;
           }
           const end = video.buffered.end(video.buffered.length - 1);
-          const maxAhead = 2.0;
+          const maxAhead = 3.0;
+          const keepBehind = 2.0;
           if (end - video.currentTime > maxAhead) {
-            const removeEnd = Math.max(0, video.currentTime - 0.5);
+            const removeEnd = Math.max(0, video.currentTime - keepBehind);
             if (removeEnd > 0 && !sourceBuffer.updating) {
               sourceBuffer.remove(0, removeEnd);
             }
@@ -287,16 +287,47 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
           }
           sourceBuffer.appendBuffer(chunk);
           await waitForUpdate();
-          appendedChunks += 1;
           trimBuffer();
         };
 
-        const getLiveEdge = () => {
+        const getBufferedRange = () => {
           if (!video.buffered || video.buffered.length === 0) {
             return null;
           }
-          const end = video.buffered.end(video.buffered.length - 1);
-          return Number.isFinite(end) ? end : null;
+          const tolerance = 0.1;
+          for (let index = 0; index < video.buffered.length; index += 1) {
+            const start = video.buffered.start(index);
+            const end = video.buffered.end(index);
+            if (
+              Number.isFinite(start) &&
+              Number.isFinite(end) &&
+              video.currentTime >= start - tolerance &&
+              video.currentTime <= end + tolerance
+            ) {
+              return { start, end };
+            }
+          }
+
+          const index = video.buffered.length - 1;
+          const start = video.buffered.start(index);
+          const end = video.buffered.end(index);
+          if (!Number.isFinite(start) || !Number.isFinite(end)) {
+            return null;
+          }
+          return { start, end };
+        };
+
+        const getLiveEdge = () => {
+          const range = getBufferedRange();
+          return range ? range.end : null;
+        };
+
+        const getBufferedAhead = () => {
+          const liveEdge = getLiveEdge();
+          if (liveEdge == null) {
+            return 0;
+          }
+          return Math.max(0, liveEdge - video.currentTime);
         };
 
         const seekTo = (time) => {
@@ -307,16 +338,31 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
           }
         };
 
-        const maybeJumpToLiveEdge = (force = false) => {
-          const liveEdge = getLiveEdge();
-          if (liveEdge == null) {
+        const syncToLiveEdge = (force = false) => {
+          const range = getBufferedRange();
+          if (!range) {
             return;
           }
-          const edgeOffset = 0.2;
-          const maxLag = 1.2;
-          const lag = liveEdge - video.currentTime;
-          if (force || (lag > maxLag && !video.seeking)) {
-            seekTo(Math.max(0, liveEdge - edgeOffset));
+          const targetLatency = 0.45;
+          const hardJumpLag = 1.8;
+          const lag = range.end - video.currentTime;
+          if ((force || lag > hardJumpLag) && !video.seeking) {
+            seekTo(Math.max(range.start, range.end - targetLatency));
+            if (video.playbackRate !== 1) {
+              video.playbackRate = 1;
+            }
+            return;
+          }
+
+          let playbackRate = 1;
+          if (lag > targetLatency + 0.6) {
+            playbackRate = 1.08;
+          } else if (lag > targetLatency + 0.25) {
+            playbackRate = 1.04;
+          }
+
+          if (Math.abs(video.playbackRate - playbackRate) > 0.01) {
+            video.playbackRate = playbackRate;
           }
         };
 
@@ -329,14 +375,13 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
             if (closed) {
               return;
             }
-            maybeJumpToLiveEdge(false);
+            syncToLiveEdge(false);
             if (video.paused) {
-              const liveEdge = getLiveEdge();
-              if (liveEdge != null && liveEdge - video.currentTime > 0.1) {
+              if (getBufferedAhead() > 0.1) {
                 video.play().catch(() => {});
               }
             }
-          }, 1000);
+          }, 500);
         };
 
         const flushPending = async () => {
@@ -349,22 +394,22 @@ export function useVideoStream({ apiBase, selectedPrinterId }) {
         };
 
         let started = false;
-        let playbackConfirmed = false;
 
-        const noteStarted = async () => {
-          const startThreshold = 1;
-          if (!started && appendedChunks < startThreshold) {
+        const noteStarted = () => {
+          if (started) {
             return;
           }
-          if (!started) {
-            started = true;
-            maybeJumpToLiveEdge(true);
-            video.play().catch(() => {});
-            startLiveEdgeTicker();
+          if (getBufferedAhead() < 0.25) {
+            return;
           }
+          started = true;
+          syncToLiveEdge(true);
+          video.play().catch(() => {});
+          startLiveEdgeTicker();
         };
 
         await flushPending();
+        noteStarted();
         while (!closed) {
           if (pendingChunks.length === 0) {
             if (wsClosed) {
