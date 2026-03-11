@@ -144,7 +144,7 @@ impl CmafSegmenter {
         };
 
         let mut pts90k = pts90k;
-        if pts90k <= current.last_pts {
+        if current.frames > 0 && pts90k <= current.last_pts {
             if !self.warned_non_monotonic_pts {
                 tracing::warn!(
                     last_pts = current.last_pts,
@@ -1049,4 +1049,71 @@ fn skip_scaling_list(br: &mut BitReader<'_>, size: usize) -> Option<()> {
         last = if next == 0 { last } else { next };
     }
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rtsp::depacketizer::AccessUnit;
+
+    fn access_unit(is_idr: bool) -> AccessUnit {
+        AccessUnit {
+            nals: vec![vec![if is_idr { 0x65 } else { 0x41 }, 0x88]],
+            rtp_timestamp: 0,
+            is_idr,
+        }
+    }
+
+    #[tokio::test]
+    async fn first_sample_keeps_its_original_pts() {
+        let mut segmenter = CmafSegmenter::new(
+            PathBuf::from("unused"),
+            2.0,
+            6,
+            0.333,
+            None,
+            false,
+            15.0,
+        )
+        .await
+        .expect("segmenter");
+
+        segmenter
+            .push_access_unit(access_unit(true), 0)
+            .await
+            .expect("push first sample");
+
+        let current = segmenter.current.as_ref().expect("current segment");
+        assert_eq!(current.start_pts, 0);
+        assert_eq!(current.last_pts, 0);
+        assert_eq!(current.frames, 1);
+    }
+
+    #[tokio::test]
+    async fn monotonic_pts_follow_real_frame_rate_after_segment_start() {
+        let mut segmenter = CmafSegmenter::new(
+            PathBuf::from("unused"),
+            2.0,
+            6,
+            0.333,
+            None,
+            false,
+            15.0,
+        )
+        .await
+        .expect("segmenter");
+
+        segmenter
+            .push_access_unit(access_unit(true), 0)
+            .await
+            .expect("push idr");
+        segmenter
+            .push_access_unit(access_unit(false), 3_000)
+            .await
+            .expect("push p-frame");
+
+        let current = segmenter.current.as_ref().expect("current segment");
+        assert_eq!(current.last_pts, 3_000);
+        assert_eq!(current.frames, 2);
+    }
 }
