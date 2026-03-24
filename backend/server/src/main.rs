@@ -1,4 +1,3 @@
-mod auth;
 mod commands;
 mod config;
 mod db;
@@ -9,7 +8,6 @@ mod rtsp;
 mod state;
 mod tls;
 
-use crate::auth::AuthManager;
 use crate::config::AppConfig;
 use crate::http::AppState;
 use crate::printers::PrinterRuntime;
@@ -31,13 +29,12 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let config = AppConfig::from_env()?;
     let db = db::init(&config.database_url).await?;
-    let printers = db::list_printers(&db).await?;
+let printers = db::list_printers(&db).await?;
     let mut runtime_map: HashMap<i64, Arc<PrinterRuntime>> = HashMap::new();
     for printer in printers {
         let runtime = PrinterRuntime::spawn(printer.clone(), &config);
         runtime_map.insert(printer.id, runtime);
     }
-    let auth = AuthManager::new(&config)?;
 
     let addr: SocketAddr = config.http_bind.parse()?;
     info!(%addr, "http server listening");
@@ -46,7 +43,6 @@ async fn main() -> anyhow::Result<()> {
         config,
         db,
         printers: Arc::new(RwLock::new(runtime_map)),
-        auth,
     });
     let app = http::router(app_state);
 

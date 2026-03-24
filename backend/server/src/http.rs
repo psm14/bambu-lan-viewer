@@ -1,4 +1,3 @@
-use crate::auth::{AuthContext, AuthManager};
 use crate::commands::{CommandPayload, CommandRequest};
 use crate::config::AppConfig;
 use crate::db::{self, PrinterCreateRequest, PrinterUpdateRequest};
@@ -10,11 +9,10 @@ use axum::extract::{
     Path, State,
 };
 use axum::http::{header, StatusCode};
-use axum::middleware;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
+use axum::{Json, Router};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -30,12 +28,10 @@ pub struct AppState {
     pub config: AppConfig,
     pub db: SqlitePool,
     pub printers: Arc<RwLock<HashMap<i64, Arc<PrinterRuntime>>>>,
-    pub auth: AuthManager,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     let protected = Router::new()
-        .route("/api/session", get(get_session))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route(
             "/api/printers/:id",
@@ -44,11 +40,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/printers/:id/status", get(get_status))
         .route("/api/printers/:id/status/stream", get(get_status_stream))
         .route("/api/printers/:id/command", post(post_command))
-        .route("/api/printers/:id/video/cmaf", get(get_cmaf_stream_ws))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+        .route("/api/printers/:id/video/cmaf", get(get_cmaf_stream_ws));
 
     Router::new()
         .merge(protected)
@@ -64,34 +56,8 @@ pub fn router(state: Arc<AppState>) -> Router {
                     axum::http::Method::PUT,
                     axum::http::Method::DELETE,
                 ])
-                .allow_headers(Any),
-        )
-}
-
-async fn auth_middleware<B>(
-    State(state): State<Arc<AppState>>,
-    mut req: axum::http::Request<B>,
-    next: middleware::Next<B>,
-) -> Response {
-    match state.auth.authenticate(req.headers()).await {
-        Ok(context) => {
-            req.extensions_mut().insert(context);
-            next.run(req).await
-        }
-        Err(error) => error.into_response(),
-    }
-}
-
-async fn get_session(Extension(auth): Extension<AuthContext>) -> impl IntoResponse {
-    Json(SessionResponse {
-        user_email: auth.email,
-    })
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionResponse {
-    user_email: String,
+.allow_headers(Any),
+    )
 }
 
 async fn list_printers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
