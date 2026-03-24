@@ -10,7 +10,6 @@ services:
       CMAF_WS_BACKLOG_SECS: "3.0"
       CMAF_WRITE_FILES: "false"
       HTTP_BIND: 0.0.0.0:8080
-      CF_ACCESS_ENABLED: "false"
       TUNNEL_TOKEN: "none" # Shadows value from env_file since it is sensitive and not needed here
     volumes:
       - backend-data:/data
