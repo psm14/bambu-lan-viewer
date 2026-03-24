@@ -27,12 +27,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
 
-  # Tailscale sidecar for private LAN access
+  # Tailscale sidecar for private LAN access (userspace mode)
   tailscale:
     image: tailscale/tailscale:latest
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
     env_file:
       - .tailscale.env
     environment:
