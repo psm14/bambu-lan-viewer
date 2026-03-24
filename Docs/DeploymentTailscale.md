@@ -12,7 +12,7 @@ This guide deploys Bambu LAN Viewer in production using:
 3. Requests are routed by path:
    - `/api` and `/api/*` -> `http://backend:8080/api`
    - all other paths -> `http://frontend:80`
-4. Backend runs with `CF_ACCESS_ENABLED=false` (security comes from Tailscale ACLs and tailnet identity).
+4. Backend runs with authentication disabled (security comes from Tailscale ACLs and tailnet identity).
 
 ## Prerequisites
 
