@@ -198,10 +198,9 @@ In that model, host port bindings can be removed or adjusted.
 
 ## Security Notes
 
-1. `CF_ACCESS_ENABLED=false` in this deployment mode.
+1. No built-in authentication in this deployment mode - add your own auth layer at the reverse proxy if internet-facing.
 2. Restrict inbound firewall rules to ports you explicitly need (typically 443 and optionally 80).
 3. Keep the backend API non-public except through your reverse proxy.
-4. Add your own auth layer if your edge is internet-facing.
 
 ## Verify
 

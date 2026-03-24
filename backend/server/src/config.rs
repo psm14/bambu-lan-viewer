@@ -23,12 +23,6 @@ pub struct AppConfig {
     pub cmaf_write_files: bool,
     pub cmaf_fallback_fps: f64,
     pub http_bind: String,
-    pub cf_access_enabled: bool,
-    pub cf_access_jwks_url: Option<String>,
-    pub cf_access_audience: Option<String>,
-    pub cf_access_issuer: Option<String>,
-    pub cf_access_jwks_cache_ttl_secs: u64,
-    pub cf_access_dev_user_email: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,23 +64,6 @@ impl AppConfig {
         let cmaf_write_files = env_bool("CMAF_WRITE_FILES", false);
         let cmaf_fallback_fps = env_f64("CMAF_FALLBACK_FPS").unwrap_or(15.0);
         let http_bind = env::var("HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
-        let cf_access_enabled = env_bool("CF_ACCESS_ENABLED", false);
-        let cf_access_team_domain = env::var("CF_ACCESS_TEAM_DOMAIN").ok();
-        let cf_access_jwks_url = env::var("CF_ACCESS_JWKS_URL").ok().or_else(|| {
-            cf_access_team_domain
-                .as_ref()
-                .map(|domain| format!("https://{domain}/cdn-cgi/access/certs"))
-        });
-        let cf_access_audience = env::var("CF_ACCESS_AUD").ok();
-        let cf_access_issuer = env::var("CF_ACCESS_ISSUER").ok().or_else(|| {
-            cf_access_team_domain
-                .as_ref()
-                .map(|domain| format!("https://{domain}"))
-        });
-        let cf_access_jwks_cache_ttl_secs =
-            env_u64("CF_ACCESS_JWKS_CACHE_TTL_SECS").unwrap_or(60 * 60);
-        let cf_access_dev_user_email =
-            env::var("CF_ACCESS_DEV_USER_EMAIL").unwrap_or_else(|_| "admin@local".to_string());
 
         Ok(Self {
             database_url,
@@ -109,12 +86,6 @@ impl AppConfig {
             cmaf_write_files,
             cmaf_fallback_fps,
             http_bind,
-            cf_access_enabled,
-            cf_access_jwks_url,
-            cf_access_audience,
-            cf_access_issuer,
-            cf_access_jwks_cache_ttl_secs,
-            cf_access_dev_user_email,
         })
     }
 }
